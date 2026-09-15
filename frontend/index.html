@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AEGIS // API Contract & Breakage Observer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@700;800&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=3.5">
+</head>
+
+<body>
+  <div class="ambient-glow glow-emerald"></div>
+  <div class="ambient-glow glow-amethyst"></div>
+  <div class="grid-overlay"></div>
+
+  <!-- Main Container -->
+  <div class="app-shell">
+
+    <!-- Top Navigation Bar -->
+    <header class="top-header">
+      <div class="brand-section">
+        <div class="radar-node">
+          <span class="radar-ping"></span>
+          <span class="radar-core"></span>
+        </div>
+        <div class="brand-text">
+          <div class="brand-title">AEGIS<span class="version-tag">OBSERVER v1.0</span></div>
+          <div class="brand-subtitle">Website & API Health Monitor — See if website services are working, changed, or
+            broken</div>
+        </div>
+      </div>
+
+      <!-- Quick Metrics Telemetry -->
+      <div class="telemetry-bar">
+        <div class="stat-pill" id="stat-total-apis" title="How many web links/APIs you are actively watching">
+          <span class="stat-label">TRACKED SITES</span>
+          <span class="stat-value" id="val-total-apis">0</span>
+        </div>
+        <div class="stat-pill stat-danger" id="stat-breaking-diffs"
+          title="Did a website change how its data is organized?">
+          <span class="stat-label">DATA CHANGES</span>
+          <span class="stat-value" id="val-breaking-diffs">0</span>
+        </div>
+        <div class="stat-pill stat-warning" id="stat-rate-alerts" title="Warnings if we send requests too fast">
+          <span class="stat-label">SPEED WARNINGS</span>
+          <span class="stat-value" id="val-rate-alerts">0</span>
+        </div>
+        <div class="stat-pill" id="stat-avg-latency" title="How fast the website server responds (lower ms is faster)">
+          <span class="stat-label">RESPONSE SPEED</span>
+          <span class="stat-value" id="val-avg-latency">-- ms</span>
+        </div>
+      </div>
+
+      <!-- Actions & Sync Controls -->
+      <div class="header-actions">
+        <div class="live-sync-indicator" id="sync-indicator" title="Auto-checking in the background">
+          <span class="sync-dot"></span>
+          <span class="sync-text" id="sync-countdown">SYNC 10s</span>
+        </div>
+        <button class="btn btn-secondary" id="btn-open-website-analyzer"
+          title="Scan any website to find all its hidden data connections">
+          <span class="btn-icon">🌐</span> EXTRACT & ANALYZE WEBSITE APIS
+        </button>
+        <button class="btn btn-primary" id="btn-open-add-modal"
+          title="Add a single website address or API key to monitor">
+          <span class="btn-icon">+</span> TRACK NEW API
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Navigation Tabs & Controls -->
+    <div class="nav-control-bar">
+      <div class="tab-group">
+        <button class="tab-btn active" data-tab="apis-deck"
+          title="View all the websites and links you are currently monitoring">
+          <span class="tab-bullet"></span> SAVED SITES & APIS
+        </button>
+        <button class="tab-btn" data-tab="events-timeline"
+          title="Read the chronological diary of everything that happened">
+          <span class="tab-bullet"></span> ACTIVITY LOG
+          <span class="counter-badge" id="badge-event-count">0</span>
+        </button>
+        <button class="tab-btn" data-tab="rate-drift" title="See graphs of website response speeds and traffic limits">
+          <span class="tab-bullet"></span> SPEED & LIMIT STATS
+        </button>
+      </div>
+
+      <div class="deck-filters">
+        <div class="search-input-wrapper">
+          <span class="search-icon">⚲</span>
+          <input type="text" id="search-apis"
+            placeholder="Search by name, address (URL), status (working/failing), or date..." autocomplete="off">
+          <div class="search-actions-bar hidden" id="search-quick-probe-bar">
+            <div class="probe-hint-wrap">
+              <span class="probe-hint-icon">🌐</span>
+              <span class="probe-hint-text">Inspect Target: <b id="quick-probe-url-text"></b></span>
+            </div>
+            <div class="probe-btn-group">
+              <button class="btn btn-sm btn-primary" id="btn-quick-probe-action" type="button">⚡ Check Now</button>
+              <button class="btn btn-sm btn-secondary" id="btn-quick-extract-action" type="button">🔬 Extract All
+                APIs</button>
+            </div>
+          </div>
+        </div>
+        <select id="filter-method" class="select-filter" title="Filter by request type">
+          <option value="ALL">All Request Types</option>
+          <option value="GET">GET (Read data)</option>
+          <option value="POST">POST (Send data)</option>
+          <option value="PUT">PUT (Replace data)</option>
+          <option value="PATCH">PATCH (Update data)</option>
+          <option value="DELETE">DELETE (Remove data)</option>
+        </select>
+        <select id="filter-status" class="select-filter" title="Filter by working or paused">
+          <option value="ALL">All Status</option>
+          <option value="ACTIVE">Active (Watching)</option>
+          <option value="PAUSED">Paused</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Viewport: APIs Deck -->
+    <main class="content-viewport" id="viewport-apis-deck">
+      <div class="apis-grid" id="apis-grid">
+        <!-- Dynamic API Cards Rendered Here -->
+      </div>
+
+      <!-- Empty State -->
+      <div class="empty-state-box hidden" id="apis-empty-state">
+        <div class="empty-icon">⌘</div>
+        <h3>No Monitored APIs Yet</h3>
+        <p>Start tracking external microservices, payment gateways, or partner contracts to detect silent breakages and
+          schema shifts.</p>
+        <div class="empty-actions">
+          <button class="btn btn-primary" id="btn-seed-sample">⚡ Add JSONPlaceholder Sample API</button>
+          <button class="btn btn-secondary" id="btn-open-add-from-empty">+ Configure Custom API</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Viewport: Event Timeline -->
+    <section class="content-viewport hidden" id="viewport-events-timeline">
+      <div class="timeline-header">
+        <div class="timeline-filters">
+          <button class="timeline-filter-btn active" data-filter-severity="ALL">All Events</button>
+          <button class="timeline-filter-btn filter-breaking" data-filter-severity="breaking">Breaking</button>
+          <button class="timeline-filter-btn filter-warning" data-filter-severity="medium">Warnings</button>
+          <button class="timeline-filter-btn filter-info" data-filter-severity="info">Info</button>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btn-refresh-events">⟳ Refresh Feed</button>
+      </div>
+      <div class="events-feed" id="events-feed">
+        <!-- Dynamic Events Stream Rendered Here -->
+      </div>
+    </section>
+
+    <!-- Viewport: Rate Limits & Latency Drift -->
+    <section class="content-viewport hidden" id="viewport-rate-drift">
+      <div class="metrics-dashboard-grid" id="metrics-dashboard-grid">
+        <!-- Rate limit gauges and latency cards rendered here -->
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Modal: Automated Endpoint Scanner (Zero-Config Onboarding) -->
+  <div class="modal-backdrop hidden" id="modal-add-api" style="display: none;">
+    <div class="modal-dialog modal-auto-onboarding">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-tag">⚡ EASY MONITOR SETUP</span>
+          <h2>Add Any Website or API Link</h2>
+        </div>
+        <button class="modal-close" id="btn-close-add-modal">&times;</button>
+      </div>
+
+      <div class="modal-body-auto">
+        <form id="form-auto-scan" class="auto-scan-form">
+          <div class="auto-input-wrapper">
+            <input type="text" id="auto-scan-url"
+              placeholder="Paste any website link, API URL, or AI Key (Google Gemini, OpenAI, Stripe, etc.)" required
+              autocomplete="off">
+            <button type="submit" class="btn btn-primary btn-scan" id="btn-run-auto-scan">
+              <span class="btn-scan-icon">⚡</span> Test & Track Link
+            </button>
+          </div>
+          <div class="scanner-help-text">
+            <span>💡 <b>How this works:</b> Think of an API like a digital bridge between two computers. Paste any web
+              link or API key here — we will test if the bridge is working, record how it responds, and keep an eye on
+              it for you.</span>
+          </div>
+
+          <!-- Optional Auth Token Row -->
+          <div class="auto-options-row">
+            <div class="form-group flex-1">
+              <input type="password" id="auto-auth-token"
+                placeholder="Optional Password / Secret API Key (if your link requires one)" autocomplete="off">
+            </div>
+          </div>
+        </form>
+
+        <!-- Live Scanning Radar Terminal (Hidden until scanning) -->
+        <div class="scan-radar-terminal hidden" id="scan-radar-terminal">
+          <div class="terminal-header">
+            <span class="terminal-dot green"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot red"></span>
+            <span class="terminal-title">AEGIS // PROBE TELEMETRY RADAR</span>
+          </div>
+          <div class="terminal-logs" id="terminal-logs">
+            <!-- Dynamic scanning log lines -->
+          </div>
+        </div>
+
+        <!-- Auto-Probe Results Card (Shows when probe finishes) -->
+        <div class="auto-probe-result hidden" id="auto-probe-result">
+          <div class="result-header">
+            <div class="result-badge-group">
+              <span class="badge badge-method-get" id="res-method">GET</span>
+              <span class="badge" style="background: var(--emerald-dim); color: var(--emerald-primary);"
+                id="res-status">200 OK</span>
+              <span class="badge badge-auth" id="res-latency">75 ms</span>
+            </div>
+            <h3 id="res-name">Endpoint Discovered</h3>
+          </div>
+          <div class="result-schema-preview">
+            <span class="preview-label">AUTO-EXTRACTED CONTRACT SCHEMA:</span>
+            <pre id="res-schema-code"></pre>
+          </div>
+          <div class="result-actions">
+            <button type="button" class="btn btn-secondary" id="btn-cancel-probe">Scan Another</button>
+            <button type="button" class="btn btn-primary" id="btn-confirm-auto-track">
+              <span>⚡ Confirm & Start Observing</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Schema Contract & Diff Visualizer -->
+  <div class="modal-backdrop hidden" id="modal-schema-diff" style="display: none;" data-api-id="">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-tag" id="diff-modal-tag">CONTRACT INSPECTOR</span>
+          <h2 id="diff-modal-api-name">API Contract & Diff History</h2>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <button class="btn-run-check" id="btn-run-check" title="Trigger an immediate health check now">
+            <span class="btn-run-check-dot"></span>
+            Run Check
+          </button>
+          <button class="modal-close" id="btn-close-diff-modal">&times;</button>
+        </div>
+      </div>
+
+      <div class="modal-tabs">
+        <button class="modal-tab-btn active" data-m-tab="diff-current-schema">Current Extracted Schema</button>
+        <button class="modal-tab-btn" data-m-tab="diff-history">Diffs & Contract Shifts</button>
+        <button class="modal-tab-btn" data-m-tab="diff-snapshots">Snapshot Logs</button>
+      </div>
+
+      <div class="modal-content-area">
+        <!-- Panel 1: Current Schema -->
+        <div class="modal-tab-panel active" id="mpanel-diff-current-schema">
+          <div class="schema-legend">
+            <span class="legend-chip"><code class="color-str">str</code> string</span>
+            <span class="legend-chip"><code class="color-int">int</code> integer</span>
+            <span class="legend-chip"><code class="color-float">float</code> number</span>
+            <span class="legend-chip"><code class="color-bool">bool</code> boolean</span>
+            <span class="legend-chip"><code class="color-none">NoneType</code> nullable</span>
+          </div>
+          <div class="schema-code-viewer" id="current-schema-code">
+            <!-- Rendered JSON Tree -->
+          </div>
+        </div>
+
+        <!-- Panel 2: Diff History -->
+        <div class="modal-tab-panel hidden" id="mpanel-diff-history">
+          <div class="diff-records-container" id="diff-records-container">
+            <!-- Chronological Diffs -->
+          </div>
+        </div>
+
+        <!-- Panel 3: Snapshot Logs -->
+        <div class="modal-tab-panel hidden" id="mpanel-diff-snapshots">
+          <div class="table-responsive">
+            <table class="snapshots-table">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>HTTP Status</th>
+                  <th>Latency</th>
+                  <th>Headers</th>
+                </tr>
+              </thead>
+              <tbody id="snapshots-table-body">
+                <!-- Snapshots rows -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dedicated Window / Modal: Website API Discovery & Service Matrix -->
+  <div class="modal-backdrop hidden" id="websiteAnalysisModal" style="display: none;">
+    <div class="modal-dialog modal-xl discovery-window">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="discovery-header-badge">🌐 WEBSITE API EXPLORER</div>
+          <h2 id="discovery-target-title">Scan Website Data Connections</h2>
+          <p class="modal-subtitle" id="discovery-target-subtitle">Discovers all the hidden background data connections
+            and web links running behind any website.</p>
+        </div>
+        <button class="modal-close-btn" id="btn-close-website-analysis">✕</button>
+      </div>
+
+      <div class="discovery-input-strip">
+        <div class="discovery-input-wrapper">
+          <span class="discovery-proto-badge">WEBSITE://</span>
+          <input type="url" id="discovery-url-input"
+            placeholder="Type any website address (e.g. maktalseo.com or https://example.com)..." autocomplete="off" />
+        </div>
+        <button class="btn btn-primary btn-glow" id="btn-run-website-analysis">
+          <span class="btn-icon">⚡</span> CRAWL & ANALYZE APIS
+        </button>
+      </div>
+
+      <div class="discovery-presets-strip">
+        <span class="preset-label">TRY A SAMPLE SITE:</span>
+        <button class="preset-chip" type="button" data-preset="https://maktalseo.com">⚡ maktalseo.com</button>
+        <button class="preset-chip" type="button" data-preset="https://jsonplaceholder.typicode.com">⚡
+          jsonplaceholder.typicode.com</button>
+        <button class="preset-chip" type="button" data-preset="https://api.github.com">⚡ api.github.com</button>
+        <button class="preset-chip" type="button" data-preset="https://httpbin.org">⚡ httpbin.org</button>
+      </div>
+
+      <!-- Scanning Progress State with Multi-Stage Pipeline HUD -->
+      <div class="discovery-loading-state hidden" id="discovery-loading">
+        <div class="radar-hud-box">
+          <div class="radar-sweep-circle">
+            <span class="radar-sweep-beam"></span>
+            <span class="radar-dot dot-1"></span>
+            <span class="radar-dot dot-2"></span>
+            <span class="radar-dot dot-3"></span>
+          </div>
+        </div>
+        <div class="loading-content">
+          <div class="loading-headline">
+            <h4>Deep Intelligence Pipeline Running...</h4>
+            <span class="pulse-tag">ACTIVE SCAN</span>
+          </div>
+          <div class="pipeline-stepper">
+            <div class="step-chip step-active" id="scan-step-1">
+              <span class="step-num">01</span>
+              <span class="step-text">SSRF Safety Filter</span>
+            </div>
+            <div class="step-chip step-active" id="scan-step-2">
+              <span class="step-num">02</span>
+              <span class="step-text">HTML & JS Decompilation</span>
+            </div>
+            <div class="step-chip step-active" id="scan-step-3">
+              <span class="step-num">03</span>
+              <span class="step-text">WP Route Introspection</span>
+            </div>
+            <div class="step-chip step-active" id="scan-step-4">
+              <span class="step-num">04</span>
+              <span class="step-text">Latency & Health Matrix</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Results Container -->
+      <div class="discovery-results-container" id="discovery-results">
+        <!-- Metric Summary Chips -->
+        <div class="discovery-metrics-bar">
+          <div class="disc-metric-card">
+            <span class="disc-metric-label">TOTAL SERVICES</span>
+            <span class="disc-metric-val" id="disc-val-total">0</span>
+          </div>
+          <div class="disc-metric-card info">
+            <span class="disc-metric-label">CRAWLED / EXTRACTED</span>
+            <span class="disc-metric-val" id="disc-val-discovered">0</span>
+          </div>
+          <div class="disc-metric-card success">
+            <span class="disc-metric-label">ONLINE & ACCESSIBLE</span>
+            <span class="disc-metric-val" id="disc-val-online">0</span>
+          </div>
+          <div class="disc-metric-card warning">
+            <span class="disc-metric-label">PROTECTED (401 AUTH)</span>
+            <span class="disc-metric-val" id="disc-val-protected">0</span>
+          </div>
+          <div class="disc-metric-card danger">
+            <span class="disc-metric-label">SHIELDED (403/405)</span>
+            <span class="disc-metric-val" id="disc-val-shielded">0</span>
+          </div>
+          <div class="disc-metric-card">
+            <span class="disc-metric-label">AVG LATENCY</span>
+            <span class="disc-metric-val sm" id="disc-val-latency">0 ms</span>
+          </div>
+        </div>
+
+        <!-- Discovered Endpoints Matrix / Table -->
+        <div class="discovery-table-wrap">
+          <table class="discovery-table">
+            <thead>
+              <tr>
+                <th style="width: 58px;">Type</th>
+                <th style="width: 26%;">Service & Source</th>
+                <th>Address (URL)</th>
+                <th style="width: 75px; text-align: center;">Certainty</th>
+                <th style="width: 120px; text-align: center;">Status</th>
+                <th style="width: 80px; text-align: right;">Speed</th>
+                <th style="width: 90px; text-align: center;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="discovery-table-body">
+              <!-- Dynamically populated rows -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-stack" id="toast-stack"></div>
+
+  <script src="app.js?v=3.5"></script>
+</body>
+
+</html>
