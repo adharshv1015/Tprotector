@@ -39,6 +39,7 @@ class TrackedAPI(Base):
     __tablename__ = "tracked_apis"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     base_url: Mapped[str] = mapped_column(String(1024), nullable=False)
     endpoint_path: Mapped[str] = mapped_column(String(1024), nullable=False)

@@ -6,6 +6,7 @@ from app.models.tracked_api import ApiStatus, AuthType, HttpMethod
 
 
 class TrackedAPIBase(BaseModel):
+    session_id: Optional[str] = Field(default=None, description="Client session identifier")
     name: str = Field(..., max_length=255, description="Descriptive name for the API")
     base_url: str = Field(..., max_length=1024, description="Base URL of the API e.g. https://api.stripe.com")
     endpoint_path: str = Field(..., max_length=1024, description="Path to monitor e.g. /v1/charges")
@@ -70,6 +71,7 @@ class TrackedAPIResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    session_id: Optional[str] = None
     name: str
     base_url: str
     endpoint_path: str

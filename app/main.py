@@ -26,6 +26,13 @@ async def lifespan(app: FastAPI):
     # Ensure tables exist on boot
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Migrate session_id column if table already exists in SQLite
+        try:
+            from sqlalchemy import text
+            await conn.execute(text("ALTER TABLE tracked_apis ADD COLUMN session_id VARCHAR(64)"))
+            logger.info("Added session_id column to tracked_apis table.")
+        except Exception:
+            pass  # Already exists
     logger.info("Database tables verified.")
 
     # Initialize and synchronize scheduler

@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +38,8 @@ class AutoTrackRequest(BaseModel):
     method: HttpMethod = Field(default=HttpMethod.GET)
     auth_token: Optional[str] = None
     is_sandbox: bool = False
+    session_id: Optional[str] = None
+    check_interval_minutes: Optional[int] = Field(default=None, ge=1)
 
 
 from app.services.universal_scanner import resolve_api_input
@@ -141,6 +143,7 @@ async def auto_track_endpoint(
     encrypted_auth = encrypt_secret({"token": auth_token}) if auth_token else None
 
     api = TrackedAPI(
+        session_id=req.session_id,
         name=req.name or probe_res["name"],
         base_url=probe_res["base_url"],
         endpoint_path=probe_res["endpoint_path"],
@@ -150,7 +153,7 @@ async def auto_track_endpoint(
         custom_headers=probe_res.get("custom_headers"),
         auth_type=auth_type,
         auth_config=encrypted_auth,
-        check_interval_minutes=probe_res.get("recommended_interval", 30),
+        check_interval_minutes=req.check_interval_minutes or probe_res.get("recommended_interval", 30),
         status=ApiStatus.ACTIVE,
         rate_limit_header_limit=probe_res.get("rate_limit_header_limit"),
         rate_limit_header_remaining=probe_res.get("rate_limit_header_remaining"),
@@ -171,6 +174,7 @@ async def auto_track_endpoint(
 async def create_tracked_api(
     payload: TrackedAPICreate,
     background_tasks: BackgroundTasks,
+    x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
     db: AsyncSession = Depends(get_db)
 ):
     """Adds a new API to monitor.
@@ -185,6 +189,7 @@ async def create_tracked_api(
         encrypted_auth = encrypt_secret(payload.auth_config)
 
     api = TrackedAPI(
+        session_id=payload.session_id or x_session_id,
         name=payload.name,
         base_url=payload.base_url,
         endpoint_path=payload.endpoint_path,
@@ -217,12 +222,19 @@ async def create_tracked_api(
 @router.get("", response_model=List[TrackedAPIResponse])
 async def list_tracked_apis(
     status_filter: Optional[ApiStatus] = Query(None, alias="status"),
+    session_id: Optional[str] = Query(None, alias="session_id"),
+    x_session_id: Optional[str] = Header(None, alias="X-Session-ID"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db)
 ):
     """Lists all tracked APIs with live operational status, latency, and creation/modification timestamps."""
+    active_session = session_id or x_session_id
     query = select(TrackedAPI)
+    
+    if active_session:
+        # User sees only their own session's APIs
+        query = query.where(TrackedAPI.session_id == active_session)
     if status_filter:
         query = query.where(TrackedAPI.status == status_filter)
     query = query.order_by(TrackedAPI.created_at.desc()).offset(skip).limit(limit)

@@ -5,6 +5,161 @@
 
 const API_BASE = window.location.origin;
 
+// Session Management & 10-Minute Timeout Inactivity Cache
+const SESSION_STORAGE_KEY = "aegis_session_id";
+const SESSION_CACHE_KEY = "aegis_session_cache_data";
+const SESSION_LAST_ACTIVE_KEY = "aegis_session_last_active";
+const INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+let currentSessionId = getOrCreateSessionId();
+let lastActiveTimestamp = Date.now();
+let inactivityCheckInterval = null;
+let sessionTimerBadgeInterval = null;
+let isSessionTimedOut = false;
+
+function getOrCreateSessionId() {
+  let sId = localStorage.getItem(SESSION_STORAGE_KEY);
+  if (!sId) {
+    sId = "sess_" + Math.random().toString(36).substring(2, 11) + "_" + Date.now().toString(36);
+    localStorage.setItem(SESSION_STORAGE_KEY, sId);
+  }
+  return sId;
+}
+
+function saveSessionCache() {
+  if (isSessionTimedOut) return;
+  const cachePayload = {
+    sessionId: currentSessionId,
+    timestamp: Date.now(),
+    currentTab: currentTab,
+    monitoredApis: monitoredApis,
+    timelineEvents: timelineEvents
+  };
+  try {
+    localStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(cachePayload));
+  } catch (e) {}
+}
+
+function loadSessionCache() {
+  try {
+    const raw = localStorage.getItem(SESSION_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed.sessionId === currentSessionId) {
+      return parsed;
+    }
+  } catch (e) {}
+  return null;
+}
+
+function recordUserActivity() {
+  if (isSessionTimedOut) return;
+  lastActiveTimestamp = Date.now();
+  localStorage.setItem(SESSION_LAST_ACTIVE_KEY, String(lastActiveTimestamp));
+}
+
+function checkInactivityTimeout() {
+  const storedLastActive = parseInt(localStorage.getItem(SESSION_LAST_ACTIVE_KEY) || String(lastActiveTimestamp), 10);
+  const elapsed = Date.now() - storedLastActive;
+
+  if (elapsed >= INACTIVITY_TIMEOUT_MS && !isSessionTimedOut) {
+    triggerSessionTimeout();
+  }
+}
+
+function triggerSessionTimeout() {
+  isSessionTimedOut = true;
+  saveSessionCache();
+
+  // Stop background sync while timed out
+  if (syncTimer) clearInterval(syncTimer);
+
+  const overlay = document.getElementById("session-timeout-overlay");
+  const apisPill = document.getElementById("cache-pill-apis");
+  const tabPill = document.getElementById("cache-pill-tab");
+
+  if (apisPill) apisPill.textContent = `📦 ${monitoredApis.length} APIs in cache`;
+  if (tabPill) tabPill.textContent = `📍 Tab: ${currentTab === 'apis-deck' ? 'Monitored APIs' : (currentTab === 'events-timeline' ? 'Event Timeline' : 'Rate Limits & Drift')}`;
+  if (overlay) overlay.classList.remove("hidden");
+}
+
+function resumeSessionFromCache() {
+  const overlay = document.getElementById("session-timeout-overlay");
+  if (overlay) overlay.classList.add("hidden");
+
+  isSessionTimedOut = false;
+  recordUserActivity();
+
+  // Restore from cache if available
+  const cached = loadSessionCache();
+  if (cached) {
+    if (cached.monitoredApis && cached.monitoredApis.length > 0) {
+      monitoredApis = cached.monitoredApis;
+      renderApis();
+      renderRateLimitsAndDrift();
+    }
+    if (cached.timelineEvents && cached.timelineEvents.length > 0) {
+      timelineEvents = cached.timelineEvents;
+      renderEvents("ALL");
+    }
+    if (cached.currentTab) {
+      switchTab(cached.currentTab);
+    }
+  }
+
+  showToast("Welcome back! Workspace restored from cache.", "success");
+  startLiveSync();
+  loadAllData();
+}
+
+function startFreshSession() {
+  localStorage.removeItem(SESSION_STORAGE_KEY);
+  localStorage.removeItem(SESSION_CACHE_KEY);
+  localStorage.removeItem(SESSION_LAST_ACTIVE_KEY);
+
+  currentSessionId = getOrCreateSessionId();
+  isSessionTimedOut = false;
+
+  const overlay = document.getElementById("session-timeout-overlay");
+  if (overlay) overlay.classList.add("hidden");
+
+  recordUserActivity();
+  monitoredApis = [];
+  timelineEvents = [];
+  renderApis();
+  renderEvents("ALL");
+  renderRateLimitsAndDrift();
+  updateSessionPillUI();
+
+  showToast("Fresh private workspace initialized.", "info");
+  startLiveSync();
+  loadAllData();
+}
+
+function updateSessionPillUI() {
+  const textDisplay = document.getElementById("session-text-display");
+  const timerBadge = document.getElementById("session-timer-badge");
+
+  if (textDisplay) {
+    const shortId = currentSessionId.split("_")[1] || "USER";
+    textDisplay.textContent = `SESSION #${shortId.toUpperCase()}`;
+  }
+
+  if (timerBadge) {
+    const storedLastActive = parseInt(localStorage.getItem(SESSION_LAST_ACTIVE_KEY) || String(lastActiveTimestamp), 10);
+    const remainingMs = Math.max(0, INACTIVITY_TIMEOUT_MS - (Date.now() - storedLastActive));
+    const totalSecs = Math.floor(remainingMs / 1000);
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
+    timerBadge.textContent = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    if (mins < 2) {
+      timerBadge.style.color = "#ef4444";
+    } else {
+      timerBadge.style.color = "#e2e8f0";
+    }
+  }
+}
+
 // State
 let monitoredApis = [];
 let timelineEvents = [];
@@ -40,12 +195,48 @@ const btnConfirmAutoTrack = document.getElementById("btn-confirm-auto-track");
 const btnCancelProbe = document.getElementById("btn-cancel-probe");
 
 let currentProbeData = null;
+let selectedCheckInterval = 5;
 
 // Init Lifecycle
 document.addEventListener("DOMContentLoaded", () => {
   setupEventListeners();
-  loadAllData();
-  startLiveSync();
+
+  // Load from cache initially if user returned
+  const cached = loadSessionCache();
+  if (cached) {
+    if (cached.monitoredApis && cached.monitoredApis.length > 0) {
+      monitoredApis = cached.monitoredApis;
+      renderApis();
+      renderRateLimitsAndDrift();
+    }
+    if (cached.timelineEvents && cached.timelineEvents.length > 0) {
+      timelineEvents = cached.timelineEvents;
+      renderEvents("ALL");
+    }
+    if (cached.currentTab) {
+      switchTab(cached.currentTab);
+    }
+  }
+
+  // Check if session had already timed out while user was away
+  const storedLastActive = parseInt(localStorage.getItem(SESSION_LAST_ACTIVE_KEY) || String(Date.now()), 10);
+  if (Date.now() - storedLastActive >= INACTIVITY_TIMEOUT_MS) {
+    triggerSessionTimeout();
+  } else {
+    recordUserActivity();
+    loadAllData();
+    startLiveSync();
+  }
+
+  // Activity listeners to reset 10m inactivity timer
+  ["mousedown", "keydown", "touchstart", "scroll"].forEach(evt => {
+    window.addEventListener(evt, recordUserActivity, { passive: true });
+  });
+
+  // Check inactivity every 2 seconds
+  inactivityCheckInterval = setInterval(checkInactivityTimeout, 2000);
+  sessionTimerBadgeInterval = setInterval(updateSessionPillUI, 1000);
+  updateSessionPillUI();
 });
 
 // Setup All UI Event Handlers
@@ -101,6 +292,40 @@ function setupEventListeners() {
   document.getElementById("btn-open-add-from-empty")?.addEventListener("click", openAddModal);
   document.getElementById("btn-close-add-modal")?.addEventListener("click", closeAddModal);
 
+  // Interval Selection Pills (1m, 5m, 10m, 30m) - Synchronize across all pill groups
+  document.addEventListener("click", (e) => {
+    const pill = e.target.closest(".btn-interval-pill");
+    if (!pill) return;
+    const intervalVal = parseInt(pill.dataset.interval, 10);
+    if (!intervalVal) return;
+
+    selectedCheckInterval = intervalVal;
+
+    // Highlight active pill across all pill containers
+    document.querySelectorAll(".btn-interval-pill").forEach(p => {
+      if (parseInt(p.dataset.interval, 10) === selectedCheckInterval) {
+        p.classList.add("active");
+      } else {
+        p.classList.remove("active");
+      }
+    });
+
+    // Update interval labels and badges
+    const resBadge = document.getElementById("res-interval-badge");
+    if (resBadge) resBadge.textContent = `Every ${selectedCheckInterval}m`;
+
+    const probeIntervalLabel = document.getElementById("probe-selected-interval-label");
+    if (probeIntervalLabel) probeIntervalLabel.textContent = `Every ${selectedCheckInterval} minute${selectedCheckInterval > 1 ? 's' : ''}`;
+
+    const trackDialogIntervalDisplay = document.getElementById("track-dialog-interval-display");
+    if (trackDialogIntervalDisplay) trackDialogIntervalDisplay.textContent = `Every ${selectedCheckInterval} minute${selectedCheckInterval > 1 ? 's' : ''}`;
+  });
+
+  // Track Interval Modal Controls
+  document.getElementById("btn-close-track-interval-modal")?.addEventListener("click", closeTrackIntervalModal);
+  document.getElementById("btn-cancel-track-interval")?.addEventListener("click", closeTrackIntervalModal);
+  document.getElementById("btn-confirm-track-interval")?.addEventListener("click", confirmTrackFromIntervalModal);
+
   // Smart Scanner Form Submit
   formAutoScan?.addEventListener("submit", handleAutoScanSubmit);
 
@@ -120,15 +345,58 @@ function setupEventListeners() {
   // Run Check Button inside Contract Inspector modal
   document.getElementById("btn-run-check")?.addEventListener("click", async () => {
     const btn = document.getElementById("btn-run-check");
+    const overlay = document.getElementById("check-loading-overlay");
+    const step1 = document.getElementById("step-connect");
+    const step2 = document.getElementById("step-inspect");
+    const step3 = document.getElementById("step-compare");
+    const loadingTitle = document.getElementById("check-loading-title");
+    const loadingDesc = document.getElementById("check-loading-desc");
+
     const apiId = modalSchemaDiff?.dataset?.apiId;
     if (!apiId) return;
 
     btn.disabled = true;
-    btn.innerHTML = `<span class="btn-run-check-dot" style="animation:none;opacity:0.5;"></span> Running…`;
+    btn.innerHTML = `<span class="btn-run-check-dot" style="animation:none;opacity:0.5;"></span> Checking…`;
+
+    // Show friendly loading screen
+    if (overlay) {
+      overlay.classList.remove("hidden");
+      if (step1) { step1.className = "loading-step active"; }
+      if (step2) { step2.className = "loading-step"; }
+      if (step3) { step3.className = "loading-step"; }
+      if (loadingTitle) loadingTitle.textContent = "Connecting to website…";
+      if (loadingDesc) loadingDesc.textContent = "Sending a request to fetch the latest data.";
+    }
+
+    // Friendly progressive timer updates while request runs
+    const timerStep2 = setTimeout(() => {
+      if (step1) step1.className = "loading-step done";
+      if (step2) step2.className = "loading-step active";
+      if (loadingTitle) loadingTitle.textContent = "Reading the data…";
+      if (loadingDesc) loadingDesc.textContent = "Checking what fields and values came back.";
+    }, 450);
+
+    const timerStep3 = setTimeout(() => {
+      if (step2) step2.className = "loading-step done";
+      if (step3) step3.className = "loading-step active";
+      if (loadingTitle) loadingTitle.textContent = "Looking for changes…";
+      if (loadingDesc) loadingDesc.textContent = "Comparing new data with past saved checks.";
+    }, 900);
 
     try {
       const res = await fetch(`${API_BASE}/apis/${apiId}/check`, { method: "POST" });
+      clearTimeout(timerStep2);
+      clearTimeout(timerStep3);
+
       if (res.ok) {
+        if (step1) step1.className = "loading-step done";
+        if (step2) step2.className = "loading-step done";
+        if (step3) step3.className = "loading-step done";
+        if (loadingTitle) loadingTitle.textContent = "All Done!";
+        if (loadingDesc) loadingDesc.textContent = "Information updated successfully.";
+
+        // Brief delay so user sees completion before modal updates
+        await new Promise(r => setTimeout(r, 400));
         showToast("Check complete! Refreshing data…", "success");
         await loadModalContractData(parseInt(apiId));
         await loadAllData();
@@ -136,8 +404,11 @@ function setupEventListeners() {
         showToast("Check failed. Try again later.", "error");
       }
     } catch (err) {
+      clearTimeout(timerStep2);
+      clearTimeout(timerStep3);
       showToast("Network error during check.", "error");
     } finally {
+      if (overlay) overlay.classList.add("hidden");
       btn.disabled = false;
       btn.innerHTML = `<span class="btn-run-check-dot"></span> Run Check`;
     }
@@ -206,6 +477,10 @@ function setupEventListeners() {
       });
     }
   });
+
+  // Session Timeout Modal Buttons
+  document.getElementById("btn-resume-session")?.addEventListener("click", resumeSessionFromCache);
+  document.getElementById("btn-start-fresh-session")?.addEventListener("click", startFreshSession);
 }
 
 // --------------------------------------------------------------------------
@@ -219,9 +494,14 @@ async function loadAllData() {
 
 async function fetchApis() {
   try {
-    const res = await fetch(`${API_BASE}/apis`);
+    const res = await fetch(`${API_BASE}/apis`, {
+      headers: {
+        "X-Session-ID": currentSessionId
+      }
+    });
     if (!res.ok) throw new Error("Failed to fetch APIs");
     monitoredApis = await res.json();
+    saveSessionCache();
     renderApis();
     renderRateLimitsAndDrift();
   } catch (err) {
@@ -231,10 +511,15 @@ async function fetchApis() {
 
 async function fetchEvents() {
   try {
-    const res = await fetch(`${API_BASE}/events?limit=50`);
+    const res = await fetch(`${API_BASE}/events?limit=50`, {
+      headers: {
+        "X-Session-ID": currentSessionId
+      }
+    });
     if (!res.ok) throw new Error("Failed to fetch events");
     timelineEvents = await res.json();
     badgeEventCount.textContent = timelineEvents.length;
+    saveSessionCache();
     renderEvents("ALL");
   } catch (err) {
     console.error("Error loading events:", err);
@@ -351,6 +636,7 @@ function createApiCard(api) {
         <div class="card-badges">
           ${liveHealthBadge}
           <span class="badge ${methodClass}">${api.method}</span>
+          ${api.check_interval_minutes ? `<span class="badge" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);" title="Checked every ${api.check_interval_minutes} minutes">⏱️ ${api.check_interval_minutes}m</span>` : ''}
           ${api.is_sandbox ? '<span class="badge badge-sandbox">SANDBOX</span>' : ''}
           <span class="badge badge-auth">${api.auth_type.toUpperCase()}</span>
           ${api.status === 'paused' ? '<span class="badge" style="background: rgba(255,255,255,0.1); color: var(--text-dim);">PAUSED</span>' : ''}
@@ -496,14 +782,23 @@ function renderEvents(severityFilter) {
     const card = document.createElement("div");
     card.className = `event-card sev-${ev.severity}`;
 
+    // Translate event type into friendly label
+    let friendlyType = "UPDATE";
+    if (ev.event_type === "breaking_schema_change") friendlyType = "⚠️ BREAKING CHANGE";
+    else if (ev.event_type === "schema_drift") friendlyType = "ℹ️ DATA UPDATED";
+    else if (ev.event_type === "rate_limit_warning") friendlyType = "🚦 USAGE LIMIT WARNING";
+    else if (ev.event_type === "deprecation_notice") friendlyType = "⏰ SUNSET NOTICE";
+    else if (ev.event_type === "endpoint_downtime") friendlyType = "🔴 SERVICE DOWN";
+    else if (ev.event_type) friendlyType = ev.event_type.replace(/_/g, " ").toUpperCase();
+
     card.innerHTML = `
       <div class="event-severity-stripe"></div>
       <div class="event-body">
         <div class="event-top-row">
-          <span class="event-type-badge">${escapeHtml(ev.event_type)}</span>
+          <span class="event-type-badge">${escapeHtml(friendlyType)}</span>
           <span class="event-time">${formatDate(ev.created_at)}</span>
         </div>
-        <div class="event-message">${escapeHtml(ev.message)}</div>
+        <div class="event-message" style="line-height: 1.5; margin-top: 4px;">${escapeHtml(ev.message)}</div>
       </div>
     `;
 
@@ -528,8 +823,7 @@ async function renderRateLimitsAndDrift() {
 
   for (const api of monitoredApis) {
     const card = document.createElement("div");
-    card.className = "api-card";
-    card.style.minHeight = "200px";
+    card.className = "rate-drift-card";
 
     // Fetch baseline metrics
     let baselineData = null;
@@ -538,31 +832,51 @@ async function renderRateLimitsAndDrift() {
       if (bRes.ok) baselineData = await bRes.json();
     } catch (e) {}
 
+    // Calculate remaining quota if last headers exist
+    let limitVal = api.rate_limit_header_limit;
+    let remVal = api.rate_limit_header_remaining;
+
+    let limitNum = parseInt(limitVal);
+    let remNum = parseInt(remVal);
+    let pctLeft = (!isNaN(limitNum) && !isNaN(remNum) && limitNum > 0) ? Math.round((remNum / limitNum) * 100) : null;
+    let quotaBarColor = pctLeft !== null ? (pctLeft > 40 ? "#10b981" : (pctLeft > 15 ? "#f59e0b" : "#ef4444")) : "#38bdf8";
+
     card.innerHTML = `
-      <div class="card-header-row">
-        <h3 class="card-title">${escapeHtml(api.name)}</h3>
+      <div class="rate-drift-header">
+        <h3 class="rate-drift-title" title="${escapeHtml(api.name)}">${escapeHtml(api.name)}</h3>
         <span class="badge ${api.is_sandbox ? 'badge-sandbox' : 'badge-auth'}">${api.method}</span>
       </div>
 
-      <div style="display: flex; gap: 20px; align-items: center; margin-top: 10px;">
-        <!-- Gauge Placeholder / Rate Limit Header Info -->
-        <div style="flex: 1; background: rgba(0,0,0,0.3); padding: 14px; border-radius: 10px; border: 1px solid var(--border-hairline);">
-          <div style="font-size: 10px; font-weight: 700; color: var(--text-dim); margin-bottom: 4px;">RATE LIMIT HEADERS</div>
-          <div style="font-family: var(--font-mono); font-size: 11px; color: var(--emerald-primary);">
-            ${api.rate_limit_header_limit || 'X-RateLimit-Limit'}<br>
-            ${api.rate_limit_header_remaining || 'X-RateLimit-Remaining'}
-          </div>
+      <div class="rate-drift-stats-row">
+        <!-- Rate Limits Box -->
+        <div class="rate-drift-stat-box">
+          <div class="stat-box-label">🚦 QUOTA USAGE</div>
+          ${pctLeft !== null ? `
+            <div style="display:flex; justify-content:space-between; align-items:baseline;">
+              <span class="stat-box-val" style="color:${quotaBarColor};">${remNum.toLocaleString()}</span>
+              <span class="stat-box-sub">/ ${limitNum.toLocaleString()} left</span>
+            </div>
+            <div style="height: 5px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; margin: 6px 0 2px 0;">
+              <div style="height: 100%; width: ${pctLeft}%; background: ${quotaBarColor}; border-radius: 3px;"></div>
+            </div>
+            <span class="stat-box-sub">${pctLeft}% available</span>
+          ` : `
+            <div class="stat-box-val" style="font-size:13px; color:#38bdf8;">Monitoring</div>
+            <span class="stat-box-sub" style="font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              ${escapeHtml(api.rate_limit_header_limit || 'x-ratelimit-limit')}
+            </span>
+          `}
         </div>
 
-        <!-- Latency Baseline Info -->
-        <div style="flex: 1; background: rgba(0,0,0,0.3); padding: 14px; border-radius: 10px; border: 1px solid var(--border-hairline);">
-          <div style="font-size: 10px; font-weight: 700; color: var(--text-dim); margin-bottom: 4px;">7-DAY LATENCY BASELINE</div>
-          <div style="font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--text-pure);">
-            ${baselineData && baselineData.avg_response_time_ms ? `${baselineData.avg_response_time_ms} ms (σ ${baselineData.std_dev_ms}ms)` : 'Accumulating data...'}
+        <!-- Latency Box -->
+        <div class="rate-drift-stat-box">
+          <div class="stat-box-label">⚡ 7-DAY SPEED</div>
+          <div class="stat-box-val" style="color:var(--text-pure);">
+            ${baselineData && baselineData.avg_response_time_ms ? `${baselineData.avg_response_time_ms} ms` : (api.last_response_time_ms ? `${api.last_response_time_ms} ms` : '-- ms')}
           </div>
-          <div style="font-size: 11px; color: var(--text-dim); margin-top: 2px;">
-            Error Rate: ${baselineData && baselineData.error_rate_percent !== undefined ? `${baselineData.error_rate_percent}%` : '0%'}
-          </div>
+          <span class="stat-box-sub">
+            Fail rate: <b style="color:${baselineData && baselineData.error_rate_percent > 5 ? '#ef4444' : '#10b981'};">${baselineData && baselineData.error_rate_percent !== undefined ? `${baselineData.error_rate_percent}%` : '0%'}</b>
+          </span>
         </div>
       </div>
     `;
@@ -610,6 +924,9 @@ async function openContractModal(apiId) {
 }
 
 function closeDiffModal() {
+  const overlay = document.getElementById("check-loading-overlay");
+  if (overlay) overlay.classList.add("hidden");
+
   if (modalSchemaDiff) {
     modalSchemaDiff.classList.add("hidden");
     modalSchemaDiff.style.display = "none";
@@ -697,18 +1014,62 @@ async function loadModalContractData(apiId) {
 
     diffsContainer.innerHTML = "";
     if (diffs.length === 0) {
-      diffsContainer.innerHTML = `<div style="color: var(--text-muted); padding: 16px;">No contract shifts or breaking changes detected. Contract is stable.</div>`;
+      diffsContainer.innerHTML = `<div style="color: var(--text-muted); padding: 24px; text-align: center;">✅ No changes detected. The data structure from this API has remained completely steady.</div>`;
     } else {
       diffs.forEach(diff => {
         const diffCard = document.createElement("div");
         diffCard.className = `diff-record-card diff-${diff.severity}`;
         
+        const isBreaking = diff.severity === "breaking";
+        const badgeColor = isBreaking ? "badge-method-delete" : (diff.severity === "medium" ? "badge-warning" : "badge-method-get");
+        const severityLabel = isBreaking ? "⚠️ POTENTIALLY BREAKING CHANGE" : (diff.severity === "medium" ? "⚠️ WARNING" : "ℹ️ MINOR UPDATE");
+        
+        // Parse friendly description of what actually changed
+        let explanationHtml = "";
+        const summary = diff.diff_summary;
+
+        if (summary && typeof summary === "object") {
+          let items = [];
+          if (summary.dictionary_item_removed || summary.iterable_item_removed) {
+            const removed = summary.dictionary_item_removed || summary.iterable_item_removed;
+            items.push(`<div style="color: #ef4444; margin-bottom: 6px;">
+              <strong>Field Removed:</strong> The outside service stopped sending <code>${escapeHtml(JSON.stringify(removed))}</code>. If your code expects this field, it may break!
+            </div>`);
+          }
+          if (summary.type_changes) {
+            items.push(`<div style="color: #f59e0b; margin-bottom: 6px;">
+              <strong>Data Type Changed:</strong> A field changed how it is formatted: <code>${escapeHtml(JSON.stringify(summary.type_changes))}</code>
+            </div>`);
+          }
+          if (summary.values_changed) {
+            items.push(`<div style="color: #f59e0b; margin-bottom: 6px;">
+              <strong>Structure Shift:</strong> Type signature changed: <code>${escapeHtml(JSON.stringify(summary.values_changed))}</code>
+            </div>`);
+          }
+          if (summary.dictionary_item_added || summary.iterable_item_added) {
+            const added = summary.dictionary_item_added || summary.iterable_item_added;
+            items.push(`<div style="color: #10b981; margin-bottom: 6px;">
+              <strong>New Field Added:</strong> The outside service added new information: <code>${escapeHtml(JSON.stringify(added))}</code>
+            </div>`);
+          }
+
+          if (items.length > 0) {
+            explanationHtml = items.join("");
+          } else {
+            explanationHtml = `<pre class="diff-summary-pre">${escapeHtml(JSON.stringify(summary, null, 2))}</pre>`;
+          }
+        } else {
+          explanationHtml = `<div style="color: var(--text-dim);">Detailed change: ${escapeHtml(String(summary))}</div>`;
+        }
+
         diffCard.innerHTML = `
-          <div class="diff-record-header">
-            <span class="badge ${diff.severity === 'breaking' ? 'badge-method-delete' : 'badge-method-get'}">${diff.severity.toUpperCase()}</span>
+          <div class="diff-record-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <span class="badge ${badgeColor}" style="font-size:11px; padding:4px 8px;">${severityLabel}</span>
             <span style="font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);">${formatDate(diff.detected_at)}</span>
           </div>
-          <pre class="diff-summary-pre">${escapeHtml(JSON.stringify(diff.diff_summary, null, 2))}</pre>
+          <div style="font-size: 13.5px; line-height: 1.5; color: var(--text-pure);">
+            ${explanationHtml}
+          </div>
         `;
         diffsContainer.appendChild(diffCard);
       });
@@ -723,37 +1084,64 @@ async function loadModalContractData(apiId) {
 // Interactive Schema Visualizer (Color-Coded Types)
 // --------------------------------------------------------------------------
 
-function renderInteractiveJsonTree(schema, indent = 0) {
-  const spaces = " ".repeat(indent * 2);
-
+function renderInteractiveJsonTree(schema, isRoot = true) {
   if (schema === null) {
-    return `<span class="color-none">null</span>`;
+    return `<span style="color:#9ca3af; font-style: italic;">Empty (No data)</span>`;
+  }
+
+  // Handle specific backend metadata structures first to make them super friendly
+  if (isRoot && typeof schema === "object" && schema._format) {
+    let out = `<div style="font-family: system-ui, sans-serif; font-size: 14px; line-height: 1.6;">`;
+    if (schema._format === "xml") {
+      out += `<div style="margin-bottom: 8px;"><strong style="color: #60a5fa;">File Type:</strong> XML Document</div>`;
+      if (schema._root) out += `<div style="margin-bottom: 8px;"><strong style="color: #60a5fa;">Main Container Name:</strong> <span style="color:var(--text-pure)">${schema._root}</span></div>`;
+      if (schema._structure) {
+         out += `<div style="margin-top: 12px; color: #9ca3af;"><strong>What's Inside:</strong></div>`;
+         out += renderInteractiveJsonTree(schema._structure, false);
+      }
+    } else if (schema._format === "text") {
+      out += `<div style="margin-bottom: 8px;"><strong style="color: #60a5fa;">File Type:</strong> Plain Text Document</div>`;
+      if (schema._line_count) out += `<div style="margin-bottom: 8px;"><strong style="color: #60a5fa;">Line Count:</strong> ${schema._line_count}</div>`;
+      if (schema._directives && schema._directives.length > 0) {
+        out += `<div><strong style="color: #60a5fa;">Contains Keywords Like:</strong> ${schema._directives.join(", ")}</div>`;
+      }
+    }
+    out += `</div>`;
+    return out;
   }
 
   if (typeof schema === "string") {
-    const typeClass = `color-${schema.toLowerCase()}`;
-    return `<span class="${typeClass}">"${escapeHtml(schema)}"</span>`;
+    let friendly = schema;
+    if (schema.toLowerCase() === "str") friendly = "Text";
+    else if (schema.toLowerCase() === "int") friendly = "Number (Whole)";
+    else if (schema.toLowerCase() === "float") friendly = "Number (Decimal)";
+    else if (schema.toLowerCase() === "bool") friendly = "Yes/No (Boolean)";
+    else if (schema.toLowerCase() === "nonetype" || schema.toLowerCase() === "none") friendly = "Empty";
+    
+    return `<span style="color:#10b981; font-weight: 500;">${friendly}</span>`;
   }
 
   if (Array.isArray(schema)) {
-    if (schema.length === 0) return `[]`;
-    const inner = renderInteractiveJsonTree(schema[0], indent + 1);
-    return `[\n${spaces}  ${inner}\n${spaces}]`;
+    if (schema.length === 0) return `<span style="color:#9ca3af; font-style: italic;">Empty List</span>`;
+    return `<div style="margin-left: 20px; border-left: 2px solid #374151; padding-left: 10px; margin-top: 5px;">
+              <div style="font-style: italic; color: #9ca3af; margin-bottom: 4px;">A list of items that contain:</div>
+              ${renderInteractiveJsonTree(schema[0], false)}
+            </div>`;
   }
 
   if (typeof schema === "object") {
     const keys = Object.keys(schema);
-    if (keys.length === 0) return `{}`;
+    if (keys.length === 0) return `<span style="color:#9ca3af; font-style: italic;">Empty Group</span>`;
 
-    let out = `{\n`;
-    keys.forEach((k, idx) => {
-      const isLast = idx === keys.length - 1;
-      const comma = isLast ? "" : ",";
-      const val = renderInteractiveJsonTree(schema[k], indent + 1);
-      out += `${spaces}  <span style="color: var(--text-pure); font-weight: 600;">"${escapeHtml(k)}"</span>: ${val}${comma}\n`;
+    let out = `<ul style="list-style-type: none; padding-left: 20px; border-left: 2px solid #374151; margin-top: 5px; margin-bottom: 5px;">`;
+    keys.forEach(k => {
+      out += `<li style="margin-bottom: 6px;">
+                <strong style="color:var(--text-pure);">${escapeHtml(k)}</strong> contains 
+                ${renderInteractiveJsonTree(schema[k], false)}
+              </li>`;
     });
-    out += `${spaces}}`;
-    return out;
+    out += `</ul>`;
+    return isRoot ? `<div style="font-family: system-ui, sans-serif; font-size: 14px;">${out}</div>` : out;
   }
 
   return escapeHtml(String(schema));
@@ -784,6 +1172,17 @@ function closeAddModal() {
 
 function resetProbeView() {
   currentProbeData = null;
+  selectedCheckInterval = 5;
+  document.querySelectorAll(".btn-interval-pill").forEach(p => {
+    if (p.dataset.interval === "5") {
+      p.classList.add("active");
+    } else {
+      p.classList.remove("active");
+    }
+  });
+  const resBadge = document.getElementById("res-interval-badge");
+  if (resBadge) resBadge.textContent = "Every 5m";
+
   if (autoScanUrlInput) autoScanUrlInput.value = "";
   if (autoAuthTokenInput) autoAuthTokenInput.value = "";
   if (scanRadarTerminal) scanRadarTerminal.classList.add("hidden");
@@ -854,13 +1253,18 @@ async function triggerInstantAutoTrack(url, name, method = "GET", isSandbox = fa
   try {
     const res = await fetch(`${API_BASE}/apis/auto-track`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        "X-Session-ID": currentSessionId
+      },
       body: JSON.stringify({
         url,
         name,
         method,
         auth_token: authToken,
-        is_sandbox: isSandbox
+        is_sandbox: isSandbox,
+        session_id: currentSessionId,
+        check_interval_minutes: selectedCheckInterval
       })
     });
 
@@ -979,6 +1383,19 @@ async function handleAutoScanSubmit(e) {
     document.getElementById("res-name").textContent = data.name;
     document.getElementById("res-schema-code").innerHTML = renderInteractiveJsonTree(data.response_schema || { status: data.status_code });
 
+    // Sync interval pills in probe result card
+    document.querySelectorAll("#probe-interval-pills-group .btn-interval-pill").forEach(p => {
+      if (parseInt(p.dataset.interval, 10) === selectedCheckInterval) {
+        p.classList.add("active");
+      } else {
+        p.classList.remove("active");
+      }
+    });
+    const probeLabel = document.getElementById("probe-selected-interval-label");
+    if (probeLabel) probeLabel.textContent = `Every ${selectedCheckInterval} minute${selectedCheckInterval > 1 ? 's' : ''}`;
+    const resIntervalBadge = document.getElementById("res-interval-badge");
+    if (resIntervalBadge) resIntervalBadge.textContent = `Every ${selectedCheckInterval}m`;
+
     autoProbeResult.classList.remove("hidden");
 
   } catch (err) {
@@ -996,19 +1413,30 @@ async function handleAutoScanSubmit(e) {
 async function handleConfirmAutoTrack() {
   if (!currentProbeData) return;
 
+  const feedbackBanner = document.getElementById("probe-track-feedback");
+  if (feedbackBanner) {
+    feedbackBanner.className = "modal-status-feedback info";
+    feedbackBanner.innerHTML = `<span class="spin">⟳</span> Connecting in background & activating monitor (every ${selectedCheckInterval}m)...`;
+  }
+
   btnConfirmAutoTrack.disabled = true;
   btnConfirmAutoTrack.innerHTML = `<span>⚡ Activating Observer...</span>`;
 
   try {
     const res = await fetch(`${API_BASE}/apis/auto-track`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        "X-Session-ID": currentSessionId
+      },
       body: JSON.stringify({
         url: currentProbeData.resolved_url || currentProbeData.raw_url || `${currentProbeData.base_url}${currentProbeData.endpoint_path}`,
         name: currentProbeData.name,
         method: currentProbeData.method,
         auth_token: currentProbeData.auth_token,
-        is_sandbox: currentProbeData.is_sandbox || false
+        is_sandbox: currentProbeData.is_sandbox || false,
+        session_id: currentSessionId,
+        check_interval_minutes: selectedCheckInterval
       })
     });
 
@@ -1018,11 +1446,26 @@ async function handleConfirmAutoTrack() {
     }
 
     const created = await res.json();
+    
+    // Show success message directly in this modal window
+    if (feedbackBanner) {
+      feedbackBanner.className = "modal-status-feedback success";
+      feedbackBanner.innerHTML = `<span>✅</span> <span><b>Tracking Active!</b> "${escapeHtml(created.name)}" is now monitored every ${created.check_interval_minutes}m.</span>`;
+    }
+
     showToast(`⚡ "${created.name}" is now monitored! Contract baseline locked.`);
-    closeAddModal();
     loadAllData();
 
+    // Auto-close modal smoothly after user sees the confirmation message inside this window
+    setTimeout(() => {
+      closeAddModal();
+    }, 1500);
+
   } catch (err) {
+    if (feedbackBanner) {
+      feedbackBanner.className = "modal-status-feedback error";
+      feedbackBanner.innerHTML = `<span>❌</span> <span>${escapeHtml(err.message)}</span>`;
+    }
     showToast("Error: " + err.message, "error");
   } finally {
     btnConfirmAutoTrack.disabled = false;
@@ -1047,8 +1490,14 @@ async function seedSampleApi() {
   try {
     const res = await fetch(`${API_BASE}/apis`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      headers: { 
+        "Content-Type": "application/json",
+        "X-Session-ID": currentSessionId
+      },
+      body: JSON.stringify({
+        ...payload,
+        session_id: currentSessionId
+      })
     });
     if (!res.ok) throw new Error("Seed failed");
     const api = await res.json();
@@ -1065,6 +1514,8 @@ async function seedSampleApi() {
 
 function switchTab(tabId) {
   currentTab = tabId;
+  saveSessionCache();
+  recordUserActivity();
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
   document.querySelectorAll(".content-viewport").forEach(v => v.classList.add("hidden"));
 
@@ -1365,7 +1816,7 @@ function renderDiscoveredEndpoints() {
           <span class="disc-latency-tag">${cleanLatency} ms</span>
         </td>
         <td style="text-align: center; white-space: nowrap;">
-          <button class="btn btn-sm btn-primary btn-track-sm" onclick="trackDiscoveredEndpoint('${encodeURIComponent(ep.url)}', '${encodeURIComponent(ep.service_name)}')">
+          <button class="btn btn-sm btn-primary btn-track-sm" onclick="trackDiscoveredEndpoint('${encodeURIComponent(ep.url)}', '${encodeURIComponent(ep.service_name)}', this)">
             + Track
           </button>
         </td>
@@ -1374,17 +1825,114 @@ function renderDiscoveredEndpoints() {
   }).join("");
 }
 
-async function trackDiscoveredEndpoint(encodedUrl, encodedName) {
+// --------------------------------------------------------------------------
+// Track Interval Selection Modal Dialog Workflow
+// --------------------------------------------------------------------------
+
+let pendingTrackItem = null;
+
+/**
+ * Triggered when clicking "+ Track" on any discovered API in the Website Explorer table.
+ * Opens the interval selection window with 1m, 5m, 10m, 30m pill options.
+ */
+function trackDiscoveredEndpoint(encodedUrl, encodedName, btnEl = null) {
   const url = decodeURIComponent(encodedUrl);
   const name = decodeURIComponent(encodedName);
 
-  showToast(`Initiating automated monitor for: ${name}...`);
+  pendingTrackItem = {
+    url,
+    name,
+    btnEl
+  };
+
+  openTrackIntervalModal(name, url);
+}
+
+function openTrackIntervalModal(name, url) {
+  const modal = document.getElementById("modal-track-interval");
+  if (!modal) return;
+
+  const titleEl = document.getElementById("track-dialog-title");
+  const nameEl = document.getElementById("track-dialog-name");
+  const urlEl = document.getElementById("track-dialog-url");
+  const feedbackEl = document.getElementById("track-dialog-feedback");
+  const confirmBtn = document.getElementById("btn-confirm-track-interval");
+  const displayLabel = document.getElementById("track-dialog-interval-display");
+
+  if (titleEl) titleEl.textContent = `Track: ${name}`;
+  if (nameEl) nameEl.textContent = name;
+  if (urlEl) urlEl.textContent = url;
+  if (feedbackEl) {
+    feedbackEl.className = "modal-status-feedback hidden";
+    feedbackEl.innerHTML = "";
+  }
+  if (confirmBtn) {
+    confirmBtn.disabled = false;
+    confirmBtn.innerHTML = `<span>⚡ Confirm & Start Tracking</span>`;
+  }
+  if (displayLabel) {
+    displayLabel.textContent = `Every ${selectedCheckInterval} minute${selectedCheckInterval > 1 ? 's' : ''}`;
+  }
+
+  // Set active class on the pill corresponding to current selectedCheckInterval
+  document.querySelectorAll("#track-dialog-interval-pills .btn-interval-pill").forEach(p => {
+    if (parseInt(p.dataset.interval, 10) === selectedCheckInterval) {
+      p.classList.add("active");
+    } else {
+      p.classList.remove("active");
+    }
+  });
+
+  modal.classList.remove("hidden");
+}
+
+function closeTrackIntervalModal() {
+  const modal = document.getElementById("modal-track-interval");
+  if (modal) modal.classList.add("hidden");
+  pendingTrackItem = null;
+}
+
+/**
+ * User clicked "Confirm & Start Tracking" inside the Track Interval dialog
+ */
+async function confirmTrackFromIntervalModal() {
+  if (!pendingTrackItem) {
+    closeTrackIntervalModal();
+    return;
+  }
+
+  const { url, name, btnEl } = pendingTrackItem;
+  const feedbackBanner = document.getElementById("track-dialog-feedback");
+  const confirmBtn = document.getElementById("btn-confirm-track-interval");
+
+  if (feedbackBanner) {
+    feedbackBanner.className = "modal-status-feedback info";
+    feedbackBanner.innerHTML = `<span class="spin">⟳</span> Connecting in background & activating monitor (every ${selectedCheckInterval}m)...`;
+  }
+
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = `<span>⚡ Activating (${selectedCheckInterval}m)...</span>`;
+  }
+
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.innerHTML = `<span class="spin">⟳</span> Tracking...`;
+  }
 
   try {
     const res = await fetch(`${API_BASE}/apis/auto-track`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url, name })
+      headers: { 
+        "Content-Type": "application/json",
+        "X-Session-ID": currentSessionId
+      },
+      body: JSON.stringify({ 
+        url, 
+        name,
+        session_id: currentSessionId,
+        check_interval_minutes: selectedCheckInterval
+      })
     });
 
     if (!res.ok) {
@@ -1393,10 +1941,49 @@ async function trackDiscoveredEndpoint(encodedUrl, encodedName) {
     }
 
     const created = await res.json();
-    showToast(`Successfully tracking ${created.name}!`, "success");
+
+    // Show success message inside this modal dialog window
+    if (feedbackBanner) {
+      feedbackBanner.className = "modal-status-feedback success";
+      feedbackBanner.innerHTML = `<span>✅</span> <span><b>Tracking Active!</b> Now monitored every ${created.check_interval_minutes}m.</span>`;
+    }
+
+    // Also update Discovery Table status feedback & button
+    const discFeedback = document.getElementById("discovery-track-feedback");
+    if (discFeedback) {
+      discFeedback.className = "modal-status-feedback success";
+      discFeedback.innerHTML = `<span>✅</span> <span><b>Tracking Active!</b> "${escapeHtml(created.name)}" added (every ${created.check_interval_minutes}m).</span>`;
+    }
+
+    if (btnEl) {
+      btnEl.className = "btn btn-sm btn-success";
+      btnEl.innerHTML = `✓ Tracked (${created.check_interval_minutes}m)`;
+      btnEl.disabled = true;
+    }
+
+    showToast(`Successfully tracking ${created.name}! (Every ${created.check_interval_minutes}m)`, "success");
     await loadAllData();
+
+    // Smoothly close interval dialog after user sees confirmation in window
+    setTimeout(() => {
+      closeTrackIntervalModal();
+    }, 1200);
+
   } catch (err) {
+    if (feedbackBanner) {
+      feedbackBanner.className = "modal-status-feedback error";
+      feedbackBanner.innerHTML = `<span>❌</span> <span>Track error: ${escapeHtml(err.message)}</span>`;
+    }
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.innerHTML = `<span>⚡ Confirm & Start Tracking</span>`;
+    }
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.innerHTML = `+ Track`;
+    }
     showToast("Track error: " + err.message, "error");
   }
 }
+
 

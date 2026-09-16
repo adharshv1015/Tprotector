@@ -10,7 +10,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@700;800&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=3.5">
+  <link rel="stylesheet" href="style.css?v=4.0">
 </head>
 
 <body>
@@ -58,6 +58,11 @@
 
       <!-- Actions & Sync Controls -->
       <div class="header-actions">
+        <div class="session-status-pill" id="session-status-pill" title="Your private workspace session">
+          <span class="session-dot"></span>
+          <span class="session-text" id="session-text-display">SESSION: PRIVATE</span>
+          <span class="session-timer-badge" id="session-timer-badge" title="Inactivity timer (10m)">10:00</span>
+        </div>
         <div class="live-sync-indicator" id="sync-indicator" title="Auto-checking in the background">
           <span class="sync-dot"></span>
           <span class="sync-text" id="sync-countdown">SYNC 10s</span>
@@ -77,16 +82,16 @@
     <div class="nav-control-bar">
       <div class="tab-group">
         <button class="tab-btn active" data-tab="apis-deck"
-          title="View all the websites and links you are currently monitoring">
-          <span class="tab-bullet"></span> SAVED SITES & APIS
+          title="View all monitored API endpoints">
+          <span class="tab-bullet"></span> MONITORED APIS
         </button>
         <button class="tab-btn" data-tab="events-timeline"
-          title="Read the chronological diary of everything that happened">
-          <span class="tab-bullet"></span> ACTIVITY LOG
+          title="Chronological timeline of breaking changes, schema diffs, and deprecation alerts">
+          <span class="tab-bullet"></span> EVENT TIMELINE
           <span class="counter-badge" id="badge-event-count">0</span>
         </button>
-        <button class="tab-btn" data-tab="rate-drift" title="See graphs of website response speeds and traffic limits">
-          <span class="tab-bullet"></span> SPEED & LIMIT STATS
+        <button class="tab-btn" data-tab="rate-drift" title="Track API rate limits and speed drift">
+          <span class="tab-bullet"></span> RATE LIMITS & DRIFT
         </button>
       </div>
 
@@ -168,7 +173,7 @@
   </div>
 
   <!-- Modal: Automated Endpoint Scanner (Zero-Config Onboarding) -->
-  <div class="modal-backdrop hidden" id="modal-add-api" style="display: none;">
+  <div class="modal-backdrop hidden" id="modal-add-api">
     <div class="modal-dialog modal-auto-onboarding">
       <div class="modal-header">
         <div class="modal-title-wrap">
@@ -194,11 +199,23 @@
               it for you.</span>
           </div>
 
-          <!-- Optional Auth Token Row -->
-          <div class="auto-options-row">
+          <!-- Optional Auth Token & Check Interval Row -->
+          <div class="auto-options-row" style="display: flex; flex-direction: column; gap: 12px; margin-top: 14px;">
             <div class="form-group flex-1">
               <input type="password" id="auto-auth-token"
                 placeholder="Optional Password / Secret API Key (if your link requires one)" autocomplete="off">
+            </div>
+            
+            <div class="interval-selection-box" style="background: rgba(0,0,0,0.3); padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border-hairline);">
+              <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; display: block; margin-bottom: 8px;">
+                ⏱️ AUTOMATIC CHECK INTERVAL (HOW OFTEN TO TEST):
+              </label>
+              <div class="interval-pills-group" id="interval-pills-group" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button type="button" class="btn-interval-pill" data-interval="1">⚡ 1 Minute</button>
+                <button type="button" class="btn-interval-pill active" data-interval="5">⏱️ 5 Minutes</button>
+                <button type="button" class="btn-interval-pill" data-interval="10">🕒 10 Minutes</button>
+                <button type="button" class="btn-interval-pill" data-interval="30">📅 30 Minutes</button>
+              </div>
             </div>
           </div>
         </form>
@@ -216,26 +233,45 @@
           </div>
         </div>
 
-        <!-- Auto-Probe Results Card (Shows when probe finishes) -->
-        <div class="auto-probe-result hidden" id="auto-probe-result">
-          <div class="result-header">
-            <div class="result-badge-group">
-              <span class="badge badge-method-get" id="res-method">GET</span>
-              <span class="badge" style="background: var(--emerald-dim); color: var(--emerald-primary);"
-                id="res-status">200 OK</span>
-              <span class="badge badge-auth" id="res-latency">75 ms</span>
+          <!-- Auto-Probe Results Card (Shows when probe finishes) -->
+          <div class="auto-probe-result hidden" id="auto-probe-result">
+            <div class="result-header">
+              <div class="result-badge-group">
+                <span class="badge badge-method-get" id="res-method">GET</span>
+                <span class="badge" style="background: var(--emerald-dim); color: var(--emerald-primary);"
+                  id="res-status">200 OK</span>
+                <span class="badge badge-auth" id="res-latency">75 ms</span>
+                <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;" id="res-interval-badge">Every 5m</span>
+              </div>
+              <h3 id="res-name">Endpoint Discovered</h3>
             </div>
-            <h3 id="res-name">Endpoint Discovered</h3>
-          </div>
-          <div class="result-schema-preview">
-            <span class="preview-label">AUTO-EXTRACTED CONTRACT SCHEMA:</span>
-            <pre id="res-schema-code"></pre>
-          </div>
-          <div class="result-actions">
-            <button type="button" class="btn btn-secondary" id="btn-cancel-probe">Scan Another</button>
-            <button type="button" class="btn btn-primary" id="btn-confirm-auto-track">
-              <span>⚡ Confirm & Start Observing</span>
-            </button>
+
+            <!-- Prominent Check Interval Selector inside Result Card -->
+            <div class="interval-selection-box" style="background: rgba(0,0,0,0.4); padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border-hairline); margin-bottom: 14px;">
+              <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                <span>⏱️ HOW OFTEN SHOULD WE TEST THIS LINK?</span>
+                <span style="color: #38bdf8; font-size: 11px;" id="probe-selected-interval-label">Every 5 minutes</span>
+              </label>
+              <div class="interval-pills-group" id="probe-interval-pills-group" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button type="button" class="btn-interval-pill" data-interval="1">⚡ 1 Minute</button>
+                <button type="button" class="btn-interval-pill active" data-interval="5">⏱️ 5 Minutes</button>
+                <button type="button" class="btn-interval-pill" data-interval="10">🕒 10 Minutes</button>
+                <button type="button" class="btn-interval-pill" data-interval="30">📅 30 Minutes</button>
+              </div>
+            </div>
+
+            <div class="result-schema-preview">
+              <span class="preview-label">AUTO-EXTRACTED CONTRACT SCHEMA:</span>
+              <pre id="res-schema-code"></pre>
+            </div>
+            <!-- In-Modal Feedback Banner for Track Action -->
+            <div class="modal-status-feedback hidden" id="probe-track-feedback"></div>
+            <div class="result-actions">
+              <button type="button" class="btn btn-secondary" id="btn-cancel-probe">Scan Another</button>
+              <button type="button" class="btn btn-primary" id="btn-confirm-auto-track">
+                <span>⚡ Confirm & Start Observing</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -243,7 +279,7 @@
   </div>
 
   <!-- Modal: Schema Contract & Diff Visualizer -->
-  <div class="modal-backdrop hidden" id="modal-schema-diff" style="display: none;" data-api-id="">
+  <div class="modal-backdrop hidden" id="modal-schema-diff" data-api-id="">
     <div class="modal-dialog modal-xl">
       <div class="modal-header">
         <div class="modal-title-wrap">
@@ -251,7 +287,7 @@
           <h2 id="diff-modal-api-name">API Contract & Diff History</h2>
         </div>
         <div style="display:flex; align-items:center; gap:10px;">
-          <button class="btn-run-check" id="btn-run-check" title="Trigger an immediate health check now">
+          <button class="btn-run-check" id="btn-run-check" title="Test now to see if the outside service changed its data shape so your app doesn't break.">
             <span class="btn-run-check-dot"></span>
             Run Check
           </button>
@@ -265,17 +301,37 @@
         <button class="modal-tab-btn" data-m-tab="diff-snapshots">Snapshot Logs</button>
       </div>
 
+      <!-- Friendly Testing / Loading Overlay -->
+      <div id="check-loading-overlay" class="check-loading-overlay hidden">
+        <div class="check-loading-card">
+          <div class="check-loading-radar">
+            <div class="radar-ping"></div>
+            <div class="radar-core">🔍</div>
+          </div>
+          <h3 id="check-loading-title" class="check-loading-title">Checking data right now…</h3>
+          <p id="check-loading-desc" class="check-loading-desc">Reaching out to the website to see what information it gives us.</p>
+          <div class="check-loading-steps">
+            <div class="loading-step active" id="step-connect">
+              <span class="step-dot"></span>
+              <span class="step-text">Connecting to the website</span>
+            </div>
+            <div class="loading-step" id="step-inspect">
+              <span class="step-dot"></span>
+              <span class="step-text">Reading incoming data</span>
+            </div>
+            <div class="loading-step" id="step-compare">
+              <span class="step-dot"></span>
+              <span class="step-text">Checking for any changes</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="modal-content-area">
         <!-- Panel 1: Current Schema -->
         <div class="modal-tab-panel active" id="mpanel-diff-current-schema">
-          <div class="schema-legend">
-            <span class="legend-chip"><code class="color-str">str</code> string</span>
-            <span class="legend-chip"><code class="color-int">int</code> integer</span>
-            <span class="legend-chip"><code class="color-float">float</code> number</span>
-            <span class="legend-chip"><code class="color-bool">bool</code> boolean</span>
-            <span class="legend-chip"><code class="color-none">NoneType</code> nullable</span>
-          </div>
-          <div class="schema-code-viewer" id="current-schema-code">
+          <div class="schema-code-viewer" id="current-schema-code" style="padding: 15px; font-family: system-ui, sans-serif; border: 1px solid #1f2937; border-radius: 8px; background: #111827;">
+            <!-- Rendered Human Readable Tree -->
             <!-- Rendered JSON Tree -->
           </div>
         </div>
@@ -310,7 +366,7 @@
   </div>
 
   <!-- Dedicated Window / Modal: Website API Discovery & Service Matrix -->
-  <div class="modal-backdrop hidden" id="websiteAnalysisModal" style="display: none;">
+  <div class="modal-backdrop hidden" id="websiteAnalysisModal">
     <div class="modal-dialog modal-xl discovery-window">
       <div class="modal-header">
         <div class="modal-title-wrap">
@@ -408,18 +464,21 @@
           </div>
         </div>
 
+        <!-- In-Modal Feedback Banner for Track Action -->
+        <div class="modal-status-feedback hidden" id="discovery-track-feedback" style="margin: 0 0 14px 0;"></div>
+
         <!-- Discovered Endpoints Matrix / Table -->
         <div class="discovery-table-wrap">
           <table class="discovery-table">
             <thead>
               <tr>
                 <th style="width: 58px;">Type</th>
-                <th style="width: 26%;">Service & Source</th>
+                <th style="width: 25%;">Service & Source</th>
                 <th>Address (URL)</th>
                 <th style="width: 75px; text-align: center;">Certainty</th>
-                <th style="width: 120px; text-align: center;">Status</th>
+                <th style="width: 110px; text-align: center;">Status</th>
                 <th style="width: 80px; text-align: right;">Speed</th>
-                <th style="width: 90px; text-align: center;">Action</th>
+                <th style="width: 140px; text-align: center; padding-right: 14px;">Action</th>
               </tr>
             </thead>
             <tbody id="discovery-table-body">
@@ -431,10 +490,85 @@
     </div>
   </div>
 
+  <!-- Dedicated Window / Modal: Choose Track Interval -->
+  <div class="modal-backdrop hidden" id="modal-track-interval">
+    <div class="modal-dialog modal-track-interval-dialog" style="max-width: 480px;">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-tag">⚡ SET CHECK INTERVAL</span>
+          <h2 id="track-dialog-title">Track Discovered API</h2>
+        </div>
+        <button class="modal-close" id="btn-close-track-interval-modal">&times;</button>
+      </div>
+
+      <div class="modal-body-auto" style="padding: 20px;">
+        <p style="font-size: 13px; color: #cbd5e1; margin-bottom: 16px; line-height: 1.5;">
+          Select how frequently you want AEGIS to automatically check this data connection in the background for breakages or changes:
+        </p>
+
+        <div class="track-target-info-card" style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-hairline); border-radius: 10px; padding: 12px 14px; margin-bottom: 18px;">
+          <div style="font-size: 11px; font-weight: 700; color: #94a3b8; margin-bottom: 4px;">TARGET ENDPOINT:</div>
+          <div id="track-dialog-name" style="font-weight: 700; color: var(--emerald-primary); font-size: 14px; word-break: break-all;">--</div>
+          <div id="track-dialog-url" style="font-size: 11.5px; color: #94a3b8; font-family: var(--font-mono); margin-top: 4px; word-break: break-all;">--</div>
+        </div>
+
+        <!-- Interval Pills -->
+        <div class="interval-selection-box" style="background: rgba(0,0,0,0.4); padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border-hairline); margin-bottom: 18px;">
+          <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+            <span>⏱️ AUTOMATIC CHECK FREQUENCY:</span>
+            <span style="color: #38bdf8; font-size: 11px;" id="track-dialog-interval-display">Every 5 minutes</span>
+          </label>
+          <div class="interval-pills-group" id="track-dialog-interval-pills" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+            <button type="button" class="btn-interval-pill" data-interval="1">⚡ 1 Minute</button>
+            <button type="button" class="btn-interval-pill active" data-interval="5">⏱️ 5 Minutes</button>
+            <button type="button" class="btn-interval-pill" data-interval="10">🕒 10 Minutes</button>
+            <button type="button" class="btn-interval-pill" data-interval="30">📅 30 Minutes</button>
+          </div>
+        </div>
+
+        <!-- In-Modal Feedback Banner -->
+        <div class="modal-status-feedback hidden" id="track-dialog-feedback" style="margin-bottom: 16px;"></div>
+
+        <div class="result-actions" style="display: flex; gap: 10px; justify-content: flex-end;">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-track-interval">Cancel</button>
+          <button type="button" class="btn btn-primary" id="btn-confirm-track-interval">
+            <span>⚡ Confirm & Start Tracking</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification Container -->
   <div class="toast-stack" id="toast-stack"></div>
 
-  <script src="app.js?v=3.5"></script>
+  <!-- Session Timeout & Cached Session Recovery Overlay -->
+  <div class="session-timeout-overlay hidden" id="session-timeout-overlay">
+    <div class="session-timeout-card">
+      <div class="timeout-icon-wrap">
+        <span class="timeout-icon">⏸️</span>
+        <div class="timeout-pulse-ring"></div>
+      </div>
+      <h2 class="timeout-title">Session Paused (10m Inactivity)</h2>
+      <p class="timeout-desc">
+        Your private workspace went to sleep after 10 minutes of no activity. All your tracked APIs, tabs, and data have been safely preserved in your browser cache.
+      </p>
+      <div class="timeout-cache-summary" id="timeout-cache-summary">
+        <span class="cache-pill" id="cache-pill-apis">📦 0 APIs in cache</span>
+        <span class="cache-pill" id="cache-pill-tab">📍 Tab: Monitored APIs</span>
+      </div>
+      <div class="timeout-action-buttons">
+        <button class="btn btn-primary btn-lg" id="btn-resume-session" style="width: 100%; justify-content: center; padding: 12px 20px; font-size: 14px;">
+          <span class="btn-icon">⚡</span> Resume Where I Left Off
+        </button>
+        <button class="btn btn-secondary btn-sm" id="btn-start-fresh-session" style="width: 100%; justify-content: center; margin-top: 8px;">
+          Start Fresh Workspace Session
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=3.9"></script>
 </body>
 
 </html>
