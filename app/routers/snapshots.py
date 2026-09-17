@@ -7,11 +7,29 @@ from app.database import get_db
 from app.models.schema_diff import SchemaDiff
 from app.models.snapshot import ApiSnapshot
 from app.models.tracked_api import TrackedAPI
-from app.schemas.snapshot import ApiSnapshotResponse, SchemaDiffResponse
+from app.schemas.snapshot import ApiSnapshotResponse, SchemaDiffResponse, DeepHistoryResponse
 from app.services.latency import get_latest_baseline
+from app.services.wayback import fetch_wayback_history
 
 router = APIRouter(prefix="/apis/{api_id}", tags=["Snapshots & Diffs"])
 
+
+@router.get("/deep-history", response_model=DeepHistoryResponse)
+async def get_deep_history(
+    api_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """Fetches deep historical schema diffs for an API from the Internet Archive."""
+    api = await db.get(TrackedAPI, api_id)
+    if not api:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"API {api_id} not found")
+
+    target_url = f"{api.base_url.rstrip('/')}/{api.endpoint_path.lstrip('/')}"
+    history = await fetch_wayback_history(target_url, api.base_url, api.id)
+    if not history:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No historical archive data found for this API")
+    
+    return history
 
 @router.get("/snapshots", response_model=List[ApiSnapshotResponse])
 async def list_api_snapshots(

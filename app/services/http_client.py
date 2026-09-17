@@ -120,7 +120,7 @@ async def execute_monitored_request(
     if tracked_api.custom_headers:
         for k, v in tracked_api.custom_headers.items():
             # Never allow legacy bot agent saved in database to overwrite browser UA
-            if k.lower() == "user-agent" and any(b in str(v).lower() for b in ["aegis-observer", "apimonitor-agent", "python-httpx"]):
+            if k.lower() == "user-agent" and any(b in str(v).lower() for b in ["tprotector-observer", "aegis-observer", "apimonitor-agent", "python-httpx"]):
                 continue
             req_headers[k] = v
     auth_headers = await resolve_auth_headers(tracked_api)

@@ -4,13 +4,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AEGIS // API Contract & Breakage Observer</title>
+  <title>TProtector // API Contract & Breakage Observer</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
-    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@700;800&display=swap"
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@600;700;800;900&family=Outfit:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Syne:wght@700;800&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=4.0">
+  <link rel="stylesheet" href="style.css?v=4.3">
 </head>
 
 <body>
@@ -29,7 +29,7 @@
           <span class="radar-core"></span>
         </div>
         <div class="brand-text">
-          <div class="brand-title">AEGIS<span class="version-tag">OBSERVER v1.0</span></div>
+          <div class="brand-title"><span class="brand-t">T</span>Protector</div>
           <div class="brand-subtitle">Website & API Health Monitor — See if website services are working, changed, or
             broken</div>
         </div>
@@ -63,10 +63,7 @@
           <span class="session-text" id="session-text-display">SESSION: PRIVATE</span>
           <span class="session-timer-badge" id="session-timer-badge" title="Inactivity timer (10m)">10:00</span>
         </div>
-        <div class="live-sync-indicator" id="sync-indicator" title="Auto-checking in the background">
-          <span class="sync-dot"></span>
-          <span class="sync-text" id="sync-countdown">SYNC 10s</span>
-        </div>
+        <!-- live-sync-indicator removed per user request -->
         <button class="btn btn-secondary" id="btn-open-website-analyzer"
           title="Scan any website to find all its hidden data connections">
           <span class="btn-icon">🌐</span> EXTRACT & ANALYZE WEBSITE APIS
@@ -81,8 +78,7 @@
     <!-- Main Navigation Tabs & Controls -->
     <div class="nav-control-bar">
       <div class="tab-group">
-        <button class="tab-btn active" data-tab="apis-deck"
-          title="View all monitored API endpoints">
+        <button class="tab-btn active" data-tab="apis-deck" title="View all monitored API endpoints">
           <span class="tab-bullet"></span> MONITORED APIS
         </button>
         <button class="tab-btn" data-tab="events-timeline"
@@ -149,14 +145,24 @@
 
     <!-- Viewport: Event Timeline -->
     <section class="content-viewport hidden" id="viewport-events-timeline">
-      <div class="timeline-header">
-        <div class="timeline-filters">
+      <div class="timeline-header" style="flex-wrap: wrap; gap: 10px; align-items: center;">
+        <div style="display: flex; gap: 10px; flex: 1; min-width: 300px;">
+          <div class="search-input-wrapper">
+            <span class="search-icon">⚲</span>
+            <input type="text" id="search-events" placeholder="Search events..." autocomplete="off">
+          </div>
+          <select id="filter-event-api" class="select-filter" title="Filter by API">
+            <option value="ALL">All APIs</option>
+          </select>
+        </div>
+        
+        <div class="timeline-filters" style="display: flex; align-items: center; flex-wrap: wrap;">
           <button class="timeline-filter-btn active" data-filter-severity="ALL">All Events</button>
           <button class="timeline-filter-btn filter-breaking" data-filter-severity="breaking">Breaking</button>
           <button class="timeline-filter-btn filter-warning" data-filter-severity="medium">Warnings</button>
           <button class="timeline-filter-btn filter-info" data-filter-severity="info">Info</button>
+          <button class="btn btn-secondary btn-sm" id="btn-refresh-events" style="margin-left: 10px;">⟳ Refresh Feed</button>
         </div>
-        <button class="btn btn-secondary btn-sm" id="btn-refresh-events">⟳ Refresh Feed</button>
       </div>
       <div class="events-feed" id="events-feed">
         <!-- Dynamic Events Stream Rendered Here -->
@@ -205,12 +211,14 @@
               <input type="password" id="auto-auth-token"
                 placeholder="Optional Password / Secret API Key (if your link requires one)" autocomplete="off">
             </div>
-            
-            <div class="interval-selection-box" style="background: rgba(0,0,0,0.3); padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border-hairline);">
+
+            <div class="interval-selection-box"
+              style="background: rgba(0,0,0,0.3); padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border-hairline);">
               <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; display: block; margin-bottom: 8px;">
                 ⏱️ AUTOMATIC CHECK INTERVAL (HOW OFTEN TO TEST):
               </label>
-              <div class="interval-pills-group" id="interval-pills-group" style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <div class="interval-pills-group" id="interval-pills-group"
+                style="display: flex; gap: 8px; flex-wrap: wrap;">
                 <button type="button" class="btn-interval-pill" data-interval="1">⚡ 1 Minute</button>
                 <button type="button" class="btn-interval-pill active" data-interval="5">⏱️ 5 Minutes</button>
                 <button type="button" class="btn-interval-pill" data-interval="10">🕒 10 Minutes</button>
@@ -226,56 +234,60 @@
             <span class="terminal-dot green"></span>
             <span class="terminal-dot yellow"></span>
             <span class="terminal-dot red"></span>
-            <span class="terminal-title">AEGIS // PROBE TELEMETRY RADAR</span>
+            <span class="terminal-title"><span class="brand-t">T</span>PROTECTOR // PROBE TELEMETRY RADAR</span>
           </div>
           <div class="terminal-logs" id="terminal-logs">
             <!-- Dynamic scanning log lines -->
           </div>
         </div>
 
-          <!-- Auto-Probe Results Card (Shows when probe finishes) -->
-          <div class="auto-probe-result hidden" id="auto-probe-result">
-            <div class="result-header">
-              <div class="result-badge-group">
-                <span class="badge badge-method-get" id="res-method">GET</span>
-                <span class="badge" style="background: var(--emerald-dim); color: var(--emerald-primary);"
-                  id="res-status">200 OK</span>
-                <span class="badge badge-auth" id="res-latency">75 ms</span>
-                <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;" id="res-interval-badge">Every 5m</span>
-              </div>
-              <h3 id="res-name">Endpoint Discovered</h3>
+        <!-- Auto-Probe Results Card (Shows when probe finishes) -->
+        <div class="auto-probe-result hidden" id="auto-probe-result">
+          <div class="result-header">
+            <div class="result-badge-group">
+              <span class="badge badge-method-get" id="res-method">GET</span>
+              <span class="badge" style="background: var(--emerald-dim); color: var(--emerald-primary);"
+                id="res-status">200 OK</span>
+              <span class="badge badge-auth" id="res-latency">75 ms</span>
+              <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;"
+                id="res-interval-badge">Every 5m</span>
             </div>
+            <h3 id="res-name">Endpoint Discovered</h3>
+          </div>
 
-            <!-- Prominent Check Interval Selector inside Result Card -->
-            <div class="interval-selection-box" style="background: rgba(0,0,0,0.4); padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border-hairline); margin-bottom: 14px;">
-              <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                <span>⏱️ HOW OFTEN SHOULD WE TEST THIS LINK?</span>
-                <span style="color: #38bdf8; font-size: 11px;" id="probe-selected-interval-label">Every 5 minutes</span>
-              </label>
-              <div class="interval-pills-group" id="probe-interval-pills-group" style="display: flex; gap: 8px; flex-wrap: wrap;">
-                <button type="button" class="btn-interval-pill" data-interval="1">⚡ 1 Minute</button>
-                <button type="button" class="btn-interval-pill active" data-interval="5">⏱️ 5 Minutes</button>
-                <button type="button" class="btn-interval-pill" data-interval="10">🕒 10 Minutes</button>
-                <button type="button" class="btn-interval-pill" data-interval="30">📅 30 Minutes</button>
-              </div>
+          <!-- Prominent Check Interval Selector inside Result Card -->
+          <div class="interval-selection-box"
+            style="background: rgba(0,0,0,0.4); padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border-hairline); margin-bottom: 14px;">
+            <label
+              style="font-size: 11.5px; font-weight: 700; color: #94a3b8; display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+              <span>⏱️ HOW OFTEN SHOULD WE TEST THIS LINK?</span>
+              <span style="color: #38bdf8; font-size: 11px;" id="probe-selected-interval-label">Every 5 minutes</span>
+            </label>
+            <div class="interval-pills-group" id="probe-interval-pills-group"
+              style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button type="button" class="btn-interval-pill" data-interval="1">⚡ 1 Minute</button>
+              <button type="button" class="btn-interval-pill active" data-interval="5">⏱️ 5 Minutes</button>
+              <button type="button" class="btn-interval-pill" data-interval="10">🕒 10 Minutes</button>
+              <button type="button" class="btn-interval-pill" data-interval="30">📅 30 Minutes</button>
             </div>
+          </div>
 
-            <div class="result-schema-preview">
-              <span class="preview-label">AUTO-EXTRACTED CONTRACT SCHEMA:</span>
-              <pre id="res-schema-code"></pre>
-            </div>
-            <!-- In-Modal Feedback Banner for Track Action -->
-            <div class="modal-status-feedback hidden" id="probe-track-feedback"></div>
-            <div class="result-actions">
-              <button type="button" class="btn btn-secondary" id="btn-cancel-probe">Scan Another</button>
-              <button type="button" class="btn btn-primary" id="btn-confirm-auto-track">
-                <span>⚡ Confirm & Start Observing</span>
-              </button>
-            </div>
+          <div class="result-schema-preview" style="margin-top: 15px;">
+            <span class="preview-label" style="display: block; margin-bottom: 8px; font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">AUTO-EXTRACTED CONTRACT SCHEMA:</span>
+            <div class="schema-code-viewer" id="res-schema-code" style="max-height: 250px; overflow-y: auto;"></div>
+          </div>
+          <!-- In-Modal Feedback Banner for Track Action -->
+          <div class="modal-status-feedback hidden" id="probe-track-feedback"></div>
+          <div class="result-actions">
+            <button type="button" class="btn btn-secondary" id="btn-cancel-probe">Scan Another</button>
+            <button type="button" class="btn btn-primary" id="btn-confirm-auto-track">
+              <span>⚡ Confirm & Start Observing</span>
+            </button>
           </div>
         </div>
       </div>
     </div>
+  </div>
   </div>
 
   <!-- Modal: Schema Contract & Diff Visualizer -->
@@ -287,7 +299,8 @@
           <h2 id="diff-modal-api-name">API Contract & Diff History</h2>
         </div>
         <div style="display:flex; align-items:center; gap:10px;">
-          <button class="btn-run-check" id="btn-run-check" title="Test now to see if the outside service changed its data shape so your app doesn't break.">
+          <button class="btn-run-check" id="btn-run-check"
+            title="Test now to see if the outside service changed its data shape so your app doesn't break.">
             <span class="btn-run-check-dot"></span>
             Run Check
           </button>
@@ -309,7 +322,8 @@
             <div class="radar-core">🔍</div>
           </div>
           <h3 id="check-loading-title" class="check-loading-title">Checking data right now…</h3>
-          <p id="check-loading-desc" class="check-loading-desc">Reaching out to the website to see what information it gives us.</p>
+          <p id="check-loading-desc" class="check-loading-desc">Reaching out to the website to see what information it
+            gives us.</p>
           <div class="check-loading-steps">
             <div class="loading-step active" id="step-connect">
               <span class="step-dot"></span>
@@ -330,7 +344,8 @@
       <div class="modal-content-area">
         <!-- Panel 1: Current Schema -->
         <div class="modal-tab-panel active" id="mpanel-diff-current-schema">
-          <div class="schema-code-viewer" id="current-schema-code" style="padding: 15px; font-family: system-ui, sans-serif; border: 1px solid #1f2937; border-radius: 8px; background: #111827;">
+          <div class="schema-code-viewer" id="current-schema-code"
+            style="padding: 15px; font-family: system-ui, sans-serif; border: 1px solid #1f2937; border-radius: 8px; background: #111827;">
             <!-- Rendered Human Readable Tree -->
             <!-- Rendered JSON Tree -->
           </div>
@@ -338,6 +353,13 @@
 
         <!-- Panel 2: Diff History -->
         <div class="modal-tab-panel hidden" id="mpanel-diff-history">
+          <div style="display: flex; justify-content: flex-end; margin-bottom: 15px;">
+            <button class="btn btn-primary btn-sm" id="btn-deep-history" onclick="fetchDeepHistory()"
+              style="background-color: var(--amethyst-primary); border-color: var(--amethyst-primary); color: #fff;">
+              <span class="btn-icon">🔍</span> Deep Scan Web Archives
+            </button>
+          </div>
+          <div id="deep-history-container" style="margin-bottom: 20px;"></div>
           <div class="diff-records-container" id="diff-records-container">
             <!-- Chronological Diffs -->
           </div>
@@ -476,7 +498,7 @@
                 <th style="width: 25%;">Service & Source</th>
                 <th>Address (URL)</th>
                 <th style="width: 75px; text-align: center;">Certainty</th>
-                <th style="width: 110px; text-align: center;">Status</th>
+                <th style="width: 130px; text-align: center;">Status</th>
                 <th style="width: 80px; text-align: right;">Speed</th>
                 <th style="width: 140px; text-align: center; padding-right: 14px;">Action</th>
               </tr>
@@ -503,22 +525,30 @@
 
       <div class="modal-body-auto" style="padding: 20px;">
         <p style="font-size: 13px; color: #cbd5e1; margin-bottom: 16px; line-height: 1.5;">
-          Select how frequently you want AEGIS to automatically check this data connection in the background for breakages or changes:
+          Select how frequently you want <span class="brand-inline"><span class="brand-t">T</span>Protector</span> to
+          automatically check this data connection in the background for breakages or changes:
         </p>
 
-        <div class="track-target-info-card" style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-hairline); border-radius: 10px; padding: 12px 14px; margin-bottom: 18px;">
+        <div class="track-target-info-card"
+          style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border-hairline); border-radius: 10px; padding: 12px 14px; margin-bottom: 18px;">
           <div style="font-size: 11px; font-weight: 700; color: #94a3b8; margin-bottom: 4px;">TARGET ENDPOINT:</div>
-          <div id="track-dialog-name" style="font-weight: 700; color: var(--emerald-primary); font-size: 14px; word-break: break-all;">--</div>
-          <div id="track-dialog-url" style="font-size: 11.5px; color: #94a3b8; font-family: var(--font-mono); margin-top: 4px; word-break: break-all;">--</div>
+          <div id="track-dialog-name"
+            style="font-weight: 700; color: var(--emerald-primary); font-size: 14px; word-break: break-all;">--</div>
+          <div id="track-dialog-url"
+            style="font-size: 11.5px; color: #94a3b8; font-family: var(--font-mono); margin-top: 4px; word-break: break-all;">
+            --</div>
         </div>
 
         <!-- Interval Pills -->
-        <div class="interval-selection-box" style="background: rgba(0,0,0,0.4); padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border-hairline); margin-bottom: 18px;">
-          <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+        <div class="interval-selection-box"
+          style="background: rgba(0,0,0,0.4); padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border-hairline); margin-bottom: 18px;">
+          <label
+            style="font-size: 11.5px; font-weight: 700; color: #94a3b8; display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
             <span>⏱️ AUTOMATIC CHECK FREQUENCY:</span>
             <span style="color: #38bdf8; font-size: 11px;" id="track-dialog-interval-display">Every 5 minutes</span>
           </label>
-          <div class="interval-pills-group" id="track-dialog-interval-pills" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
+          <div class="interval-pills-group" id="track-dialog-interval-pills"
+            style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
             <button type="button" class="btn-interval-pill" data-interval="1">⚡ 1 Minute</button>
             <button type="button" class="btn-interval-pill active" data-interval="5">⏱️ 5 Minutes</button>
             <button type="button" class="btn-interval-pill" data-interval="10">🕒 10 Minutes</button>
@@ -551,24 +581,27 @@
       </div>
       <h2 class="timeout-title">Session Paused (10m Inactivity)</h2>
       <p class="timeout-desc">
-        Your private workspace went to sleep after 10 minutes of no activity. All your tracked APIs, tabs, and data have been safely preserved in your browser cache.
+        Your private workspace went to sleep after 10 minutes of no activity. All your tracked APIs, tabs, and data have
+        been safely preserved in your browser cache.
       </p>
       <div class="timeout-cache-summary" id="timeout-cache-summary">
         <span class="cache-pill" id="cache-pill-apis">📦 0 APIs in cache</span>
         <span class="cache-pill" id="cache-pill-tab">📍 Tab: Monitored APIs</span>
       </div>
       <div class="timeout-action-buttons">
-        <button class="btn btn-primary btn-lg" id="btn-resume-session" style="width: 100%; justify-content: center; padding: 12px 20px; font-size: 14px;">
+        <button class="btn btn-primary btn-lg" id="btn-resume-session"
+          style="width: 100%; justify-content: center; padding: 12px 20px; font-size: 14px;">
           <span class="btn-icon">⚡</span> Resume Where I Left Off
         </button>
-        <button class="btn btn-secondary btn-sm" id="btn-start-fresh-session" style="width: 100%; justify-content: center; margin-top: 8px;">
+        <button class="btn btn-secondary btn-sm" id="btn-start-fresh-session"
+          style="width: 100%; justify-content: center; margin-top: 8px;">
           Start Fresh Workspace Session
         </button>
       </div>
     </div>
   </div>
 
-  <script src="app.js?v=3.9"></script>
+  <script src="app.js?v=4.7"></script>
 </body>
 
 </html>

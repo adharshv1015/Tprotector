@@ -50,10 +50,10 @@ async def _execute_check(api_id: int, db: AsyncSession, force: bool = False) -> 
         return None
 
     # Sanitize legacy bot User-Agent if stored from initial scanner
-    if tracked_api.custom_headers and any("aegis-observer" in str(v).lower() or "apimonitor-agent" in str(v).lower() for v in tracked_api.custom_headers.values()):
+    if tracked_api.custom_headers and any(b in str(v).lower() for v in tracked_api.custom_headers.values() for b in ["tprotector-observer", "aegis-observer", "apimonitor-agent"]):
         tracked_api.custom_headers = {
             k: v for k, v in tracked_api.custom_headers.items()
-            if not (k.lower() == "user-agent" and any(b in str(v).lower() for b in ["aegis-observer", "apimonitor-agent", "python-httpx"]))
+            if not (k.lower() == "user-agent" and any(b in str(v).lower() for b in ["tprotector-observer", "aegis-observer", "apimonitor-agent", "python-httpx"]))
         }
         await db.commit()
 
@@ -119,6 +119,17 @@ async def _execute_check(api_id: int, db: AsyncSession, force: bool = False) -> 
             message=f"Check failed for {tracked_api.name}: {error}"
         )
         return snapshot
+        
+    # 3.5. Handle HTTP Errors (4xx, 5xx)
+    if status_code >= 400:
+        await record_event(
+            db=db,
+            tracked_api_id=api_id,
+            event_type="http_error",
+            severity=EventSeverity.HIGH,
+            message=f"API returned HTTP Error: {status_code} for {tracked_api.name}"
+        )
+        # We don't return early here so we can still track schema changes even on error pages
 
     # 4. Schema Diffing (Compares strictly against latest successful schema snapshot)
     if extracted_schema is not None:
@@ -165,7 +176,7 @@ async def _execute_check(api_id: int, db: AsyncSession, force: bool = False) -> 
                 tracked_api_id=api_id,
                 event_type="schema_change",
                 severity=event_severity,
-                message=f"Schema change ({severity.value}) detected for {tracked_api.name} [{tracked_api.endpoint_path}]",
+                message=f"Major Rule Change (The plug shape changed): Old ways will fail for {tracked_api.name} [{tracked_api.endpoint_path}]",
                 old_value=old_schema,
                 new_value=extracted_schema
             )
@@ -221,7 +232,7 @@ async def _execute_check(api_id: int, db: AsyncSession, force: bool = False) -> 
                 tracked_api_id=api_id,
                 event_type="latency_spike",
                 severity=EventSeverity.MEDIUM,
-                message=f"Latency spike detected for {tracked_api.name}: {elapsed_ms}ms (z-score: {z_score}, baseline avg: {baseline.avg_response_time_ms}ms)"
+                message=f"Slowdown Alert: Things are moving much slower than normal for {tracked_api.name}: {elapsed_ms}ms (z-score: {z_score}, baseline avg: {baseline.avg_response_time_ms}ms)"
             )
 
     # 7. Deprecation & Documentation Scraping (Auto-probes URL once if not configured)
@@ -250,7 +261,7 @@ async def _execute_check(api_id: int, db: AsyncSession, force: bool = False) -> 
                             db.add(notice)
                         await db.commit()
 
-                        msg = f"Changelog updated for {tracked_api.name}."
+                        msg = f"Writing in a Diary: Someone made a change, and we wrote it down for {tracked_api.name}."
                         if matches:
                             msg += f" Flagged {len(matches)} potential deprecation mention(s)."
                         

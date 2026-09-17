@@ -1,5 +1,5 @@
 /* ==========================================================================
-   AEGIS OBSERVER — OBSIDIAN & CYBER EMERALD / AMETHYST DESIGN SYSTEM
+   TPROTECTOR OBSERVER — OBSIDIAN & CYBER EMERALD / AMETHYST DESIGN SYSTEM
    Zero generic blues. Pure high-precision terminal observability aesthetic.
    ========================================================================== */
 
@@ -44,7 +44,14 @@
   --border-hairline: rgba(255, 255, 255, 0.08);
   --border-card: rgba(255, 255, 255, 0.05);
 
+  /* Brand Accent: Cyber Yellow */
+  --yellow-primary: #ffd600;
+  --yellow-glow: rgba(255, 214, 0, 0.45);
+  --yellow-dim: rgba(255, 214, 0, 0.15);
+  --yellow-border: rgba(255, 214, 0, 0.35);
+
   /* Font Families */
+  --font-brand: 'Orbitron', 'Space Grotesk', -apple-system, sans-serif;
   --font-display: 'Outfit', 'Space Grotesk', -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
   --font-title: 'Syne', sans-serif;
@@ -147,9 +154,7 @@ body {
   position: relative;
   width: 38px;
   height: 38px;
-  background: var(--emerald-dim);
-  border: 1px solid var(--emerald-border);
-  border-radius: 10px;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -167,25 +172,40 @@ body {
   position: absolute;
   width: 100%;
   height: 100%;
-  border-radius: 10px;
+  border-radius: 50%;
   border: 1px solid var(--emerald-primary);
-  animation: ping 2.5s cubic-bezier(0, 0, 0.2, 1) infinite;
-}
-
-@keyframes ping {
-  0% { transform: scale(0.9); opacity: 0.8; }
-  100% { transform: scale(1.6); opacity: 0; }
+  opacity: 0.5;
 }
 
 .brand-text .brand-title {
-  font-family: var(--font-title);
-  font-size: 20px;
+  font-family: var(--font-brand);
+  font-size: 21px;
   font-weight: 800;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
   color: var(--text-pure);
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.brand-title .brand-t,
+.brand-t {
+  color: var(--yellow-primary);
+  text-shadow: 0 0 10px var(--yellow-glow), 0 0 22px rgba(255, 214, 0, 0.3);
+  font-weight: 900;
+  display: inline-block;
+  transition: text-shadow 0.25s ease, transform 0.25s ease;
+}
+
+.brand-text:hover .brand-t {
+  text-shadow: 0 0 16px rgba(255, 214, 0, 0.8), 0 0 30px rgba(255, 214, 0, 0.5);
+  transform: scale(1.06);
+}
+
+.brand-inline {
+  font-family: var(--font-brand);
+  font-weight: 700;
+  color: var(--text-pure);
 }
 
 .version-tag {
@@ -654,36 +674,55 @@ body {
   gap: 6px;
 }
 
-.pulse-dot-green {
-  width: 6px;
-  height: 6px;
+.pulse-dot-green, .pulse-dot-red, .pulse-dot-amber {
+  position: relative;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pulse-dot-green {
   background: var(--emerald-primary);
   box-shadow: 0 0 8px var(--emerald-primary);
-  animation: pulse-health 1.8s infinite ease-in-out;
+}
+.pulse-dot-green::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  border: 1px solid var(--emerald-primary);
+  animation: ping-vector-dot 1.8s cubic-bezier(0, 0.2, 0.8, 1) infinite;
 }
 
 .pulse-dot-red {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
   background: var(--crimson-primary);
   box-shadow: 0 0 8px var(--crimson-primary);
-  animation: pulse-health 1s infinite ease-in-out;
+}
+.pulse-dot-red::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  border: 1px solid var(--crimson-primary);
+  animation: ping-vector-dot 1.2s cubic-bezier(0, 0.2, 0.8, 1) infinite;
 }
 
 .pulse-dot-amber {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
   background: var(--amber-primary);
   box-shadow: 0 0 6px var(--amber-primary);
 }
-
-@keyframes pulse-health {
-  0% { transform: scale(0.9); opacity: 0.6; }
-  50% { transform: scale(1.25); opacity: 1; }
-  100% { transform: scale(0.9); opacity: 0.6; }
+.pulse-dot-amber::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  border: 1px solid var(--amber-primary);
+  animation: ping-vector-dot 1.8s cubic-bezier(0, 0.2, 0.8, 1) infinite;
 }
 
 .url-label {
@@ -1077,17 +1116,36 @@ body {
 }
 
 .btn-run-check-dot {
-  width: 7px;
-  height: 7px;
+  position: relative;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: #10b981;
-  box-shadow: 0 0 6px #10b981;
-  animation: pulse-green 1.4s infinite;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+  flex-shrink: 0;
 }
 
-@keyframes pulse-green {
-  0%, 100% { opacity: 1; box-shadow: 0 0 6px #10b981; }
-  50%       { opacity: 0.4; box-shadow: 0 0 2px #10b981; }
+.btn-run-check-dot::after {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid #10b981;
+  animation: ping-vector-dot 1.5s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+}
+
+@keyframes ping-vector-dot {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2.8);
+    opacity: 0;
+  }
 }
 
 .modal-form {
@@ -2615,13 +2673,13 @@ body {
   margin-bottom: 18px;
 }
 
-.radar-core {
+.check-loading-radar .radar-core {
   font-size: 28px;
   z-index: 2;
   animation: bounceCore 1.5s infinite ease-in-out;
 }
 
-.radar-ping {
+.check-loading-radar .radar-ping {
   position: absolute;
   width: 100%;
   height: 100%;
@@ -3013,5 +3071,19 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+.spin {
+  display: inline-block;
+  animation: spin-anim 1s linear infinite;
+}
+
+@keyframes spin-anim {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }

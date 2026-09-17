@@ -27,3 +27,8 @@ class SchemaDiffResponse(BaseModel):
     diff_summary: Optional[Any] = None
     severity: DiffSeverity
     detected_at: datetime
+
+
+class DeepHistoryResponse(BaseModel):
+    first_seen_at: datetime
+    diffs: list[SchemaDiffResponse]

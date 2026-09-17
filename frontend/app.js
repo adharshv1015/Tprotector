@@ -1,14 +1,14 @@
 /**
- * AEGIS OBSERVER — FRONTEND CONTROLLER
+ * TPROTECTOR OBSERVER — FRONTEND CONTROLLER
  * High-precision, zero-dependency async client for API Contract & Breakage Monitoring.
  */
 
 const API_BASE = window.location.origin;
 
 // Session Management & 10-Minute Timeout Inactivity Cache
-const SESSION_STORAGE_KEY = "aegis_session_id";
-const SESSION_CACHE_KEY = "aegis_session_cache_data";
-const SESSION_LAST_ACTIVE_KEY = "aegis_session_last_active";
+const SESSION_STORAGE_KEY = "tprotector_session_id";
+const SESSION_CACHE_KEY = "tprotector_session_cache_data";
+const SESSION_LAST_ACTIVE_KEY = "tprotector_session_last_active";
 const INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
 let currentSessionId = getOrCreateSessionId();
@@ -18,11 +18,11 @@ let sessionTimerBadgeInterval = null;
 let isSessionTimedOut = false;
 
 function getOrCreateSessionId() {
-  let sId = localStorage.getItem(SESSION_STORAGE_KEY);
+  let sId = localStorage.getItem(SESSION_STORAGE_KEY) || localStorage.getItem("aegis_session_id");
   if (!sId) {
     sId = "sess_" + Math.random().toString(36).substring(2, 11) + "_" + Date.now().toString(36);
-    localStorage.setItem(SESSION_STORAGE_KEY, sId);
   }
+  localStorage.setItem(SESSION_STORAGE_KEY, sId);
   return sId;
 }
 
@@ -31,9 +31,7 @@ function saveSessionCache() {
   const cachePayload = {
     sessionId: currentSessionId,
     timestamp: Date.now(),
-    currentTab: currentTab,
-    monitoredApis: monitoredApis,
-    timelineEvents: timelineEvents
+    currentTab: currentTab
   };
   try {
     localStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(cachePayload));
@@ -116,6 +114,7 @@ function startFreshSession() {
   localStorage.removeItem(SESSION_STORAGE_KEY);
   localStorage.removeItem(SESSION_CACHE_KEY);
   localStorage.removeItem(SESSION_LAST_ACTIVE_KEY);
+  localStorage.removeItem("aegis_session_id"); // Clear legacy Aegis key too
 
   currentSessionId = getOrCreateSessionId();
   isSessionTimedOut = false;
@@ -201,18 +200,9 @@ let selectedCheckInterval = 5;
 document.addEventListener("DOMContentLoaded", () => {
   setupEventListeners();
 
-  // Load from cache initially if user returned
+  // Load current tab from cache if user returned
   const cached = loadSessionCache();
   if (cached) {
-    if (cached.monitoredApis && cached.monitoredApis.length > 0) {
-      monitoredApis = cached.monitoredApis;
-      renderApis();
-      renderRateLimitsAndDrift();
-    }
-    if (cached.timelineEvents && cached.timelineEvents.length > 0) {
-      timelineEvents = cached.timelineEvents;
-      renderEvents("ALL");
-    }
     if (cached.currentTab) {
       switchTab(cached.currentTab);
     }
@@ -285,7 +275,30 @@ function setupEventListeners() {
     });
   });
 
+  // Telemetry Pills Click Handlers
+  document.getElementById("stat-breaking-diffs")?.addEventListener("click", () => {
+    const breakingEvents = timelineEvents.filter(e => e.severity === "breaking");
+    if (breakingEvents.length > 0) {
+      switchTab("events-timeline");
+      const breakingBtn = document.querySelector(".timeline-filter-btn.filter-breaking");
+      if (breakingBtn) breakingBtn.click();
+    }
+  });
+
   document.getElementById("btn-refresh-events")?.addEventListener("click", fetchEvents);
+
+  // Event Timeline Search & Filter
+  document.getElementById("search-events")?.addEventListener("input", () => {
+    const activeFilterBtn = document.querySelector(".timeline-filter-btn.active");
+    const severity = activeFilterBtn ? activeFilterBtn.dataset.filterSeverity : "ALL";
+    renderEvents(severity);
+  });
+
+  document.getElementById("filter-event-api")?.addEventListener("change", () => {
+    const activeFilterBtn = document.querySelector(".timeline-filter-btn.active");
+    const severity = activeFilterBtn ? activeFilterBtn.dataset.filterSeverity : "ALL";
+    renderEvents(severity);
+  });
 
   // Add API Modal Triggers (Zero-Config Auto Scanner)
   document.getElementById("btn-open-add-modal")?.addEventListener("click", openAddModal);
@@ -510,35 +523,48 @@ async function fetchApis() {
 }
 
 async function fetchEvents() {
+  const btn = document.getElementById("btn-refresh-events");
+  const originalText = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.innerHTML = `<span class="spin" style="display:inline-block">⟳</span> Refreshing...`;
+    btn.disabled = true;
+  }
+
   try {
-    const res = await fetch(`${API_BASE}/events?limit=50`, {
+    const res = await fetch(`${API_BASE}/events?limit=50&_t=${Date.now()}`, {
       headers: {
         "X-Session-ID": currentSessionId
-      }
+      },
+      cache: "no-store"
     });
     if (!res.ok) throw new Error("Failed to fetch events");
     timelineEvents = await res.json();
-    badgeEventCount.textContent = timelineEvents.length;
+    if (badgeEventCount) badgeEventCount.textContent = timelineEvents.length;
     saveSessionCache();
-    renderEvents("ALL");
+    
+    const activeFilterBtn = document.querySelector(".timeline-filter-btn.active");
+    const currentFilter = activeFilterBtn ? activeFilterBtn.dataset.filterSeverity : "ALL";
+    renderEvents(currentFilter);
   } catch (err) {
     console.error("Error loading events:", err);
+  } finally {
+    if (btn) {
+      btn.innerHTML = originalText;
+      btn.disabled = false;
+    }
   }
 }
 
 function startLiveSync() {
   if (syncTimer) clearInterval(syncTimer);
   syncCountdownVal = 10;
-  syncCountdownEl.textContent = `SYNC ${syncCountdownVal}s`;
 
   syncTimer = setInterval(async () => {
     syncCountdownVal--;
     if (syncCountdownVal <= 0) {
-      syncCountdownEl.textContent = `SYNCING...`;
       await loadAllData();
       syncCountdownVal = 10;
     }
-    syncCountdownEl.textContent = `SYNC ${syncCountdownVal}s`;
   }, 1000);
 }
 
@@ -588,6 +614,22 @@ function renderApis() {
     });
   }
 
+  // Update Event Timeline API Filter Dropdown
+  const apiDropdown = document.getElementById("filter-event-api");
+  if (apiDropdown) {
+    const currentVal = apiDropdown.value;
+    apiDropdown.innerHTML = '<option value="ALL">All APIs</option>';
+    monitoredApis.forEach(api => {
+      const opt = document.createElement("option");
+      opt.value = api.id;
+      opt.textContent = api.name;
+      apiDropdown.appendChild(opt);
+    });
+    if (Array.from(apiDropdown.options).some(o => o.value === currentVal)) {
+      apiDropdown.value = currentVal;
+    }
+  }
+
   // Address Bar Live Website Check suggestion:
   if (quickProbeBar) {
     const looksLikeUrl = searchQuery && (searchQuery.includes(".") || searchQuery.includes("/") || searchQuery.startsWith("http") || searchQuery.startsWith("aiza") || searchQuery.startsWith("sk-"));
@@ -604,91 +646,51 @@ function createApiCard(api) {
   const card = document.createElement("div");
   card.className = `api-card ${api.status === "paused" ? "is-paused" : ""}`;
   card.id = `api-card-${api.id}`;
+  card.style.padding = "14px 16px";
+  card.style.display = "flex";
+  card.style.flexDirection = "column";
+  card.style.gap = "10px";
 
   const methodClass = `badge-method-${api.method.toLowerCase()}`;
   const fullUrl = `${api.base_url.replace(/\/$/, "")}/${api.endpoint_path.replace(/^\//, "")}`;
 
-  // Live health status badge (Currently Working / Failing / Pending)
   let liveHealthBadge = '';
   if (api.is_working === true) {
-    liveHealthBadge = `
-      <span class="badge badge-health-working" title="API call is currently working (HTTP ${api.last_status_code})">
-        <span class="pulse-dot-green"></span> CURRENTLY WORKING (${api.last_status_code} • ${Math.round(api.last_response_time_ms || 0)}ms)
-      </span>
-    `;
+    liveHealthBadge = `<span class="pulse-dot-green" title="Working (${api.last_status_code})"></span>`;
   } else if (api.is_working === false) {
-    liveHealthBadge = `
-      <span class="badge badge-health-failing" title="API check failing with HTTP status ${api.last_status_code}">
-        <span class="pulse-dot-red"></span> FAILING (HTTP ${api.last_status_code || 'CONN ERR'})
-      </span>
-    `;
+    liveHealthBadge = `<span class="pulse-dot-red" title="Failing (${api.last_status_code})"></span>`;
   } else {
-    liveHealthBadge = `
-      <span class="badge badge-health-pending" title="Awaiting initial verification ping">
-        <span class="pulse-dot-amber"></span> PENDING CHECK
-      </span>
-    `;
+    liveHealthBadge = `<span class="pulse-dot-amber" title="Pending"></span>`;
   }
 
   card.innerHTML = `
-    <div class="card-header-row">
-      <div class="card-title-group">
-        <div class="card-badges">
-          ${liveHealthBadge}
-          <span class="badge ${methodClass}">${api.method}</span>
-          ${api.check_interval_minutes ? `<span class="badge" style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);" title="Checked every ${api.check_interval_minutes} minutes">⏱️ ${api.check_interval_minutes}m</span>` : ''}
-          ${api.is_sandbox ? '<span class="badge badge-sandbox">SANDBOX</span>' : ''}
-          <span class="badge badge-auth">${api.auth_type.toUpperCase()}</span>
-          ${api.status === 'paused' ? '<span class="badge" style="background: rgba(255,255,255,0.1); color: var(--text-dim);">PAUSED</span>' : ''}
-        </div>
-        <h3 class="card-title">${escapeHtml(api.name)}</h3>
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
+      <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+        <div style="padding-left: 2px;">${liveHealthBadge}</div>
+        <h3 class="card-title" style="margin: 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(api.name)}">
+          ${escapeHtml(api.name)}
+        </h3>
+        <span class="badge ${methodClass}" style="padding: 3px 6px; font-size: 10px;">${api.method}</span>
+        ${api.check_interval_minutes ? `<span class="badge" style="background: rgba(56,189,248,0.1); color: #38bdf8; font-size: 10px; padding: 3px 6px; border: 1px solid rgba(56,189,248,0.2);">⏱️ ${api.check_interval_minutes}m</span>` : ''}
+      </div>
+      <div style="display: flex; gap: 6px; flex-shrink: 0;">
+        <button class="btn btn-primary btn-sm btn-icon-only" onclick="triggerApiCheck(${api.id})" title="Check Now" style="padding: 4px 8px;">⚡</button>
+        <button class="btn btn-secondary btn-sm btn-icon-only" onclick="openContractModal(${api.id})" title="Contract & Diffs" style="padding: 4px 8px;">🔍</button>
+        <button class="btn btn-secondary btn-sm btn-icon-only" onclick="toggleApiPause(${api.id}, '${api.status}')" title="${api.status === 'active' ? 'Pause' : 'Resume'}" style="padding: 4px 8px;">
+          ${api.status === 'active' ? '⏸' : '▶'}
+        </button>
+        <button class="btn btn-secondary btn-sm btn-icon-only" onclick="deleteApi(${api.id})" title="Delete Target" style="padding: 4px 8px;">🗑</button>
       </div>
     </div>
 
-    <!-- API Call Address Bar -->
-    <div class="card-url-bar">
-      <span class="url-label">ADDRESS:</span>
-      <span class="url-text" title="${escapeHtml(fullUrl)}">${escapeHtml(fullUrl)}</span>
+    <div class="card-url-bar" style="margin: 0; padding: 6px 12px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-hairline); border-radius: 6px;">
+      <span class="url-text" style="font-size: 12px; opacity: 0.8; font-family: monospace;" title="${escapeHtml(fullUrl)}">${escapeHtml(fullUrl)}</span>
       <button class="btn-copy-url" title="Copy Address" onclick="copyToClipboard('${escapeHtml(fullUrl)}')">❐</button>
     </div>
 
-    <!-- Operational Telemetry: Currently Working, Created, Modified, Last Checked -->
-    <div class="card-metrics-strip">
-      <div class="metric-cell">
-        <span class="metric-label">CURRENTLY WORKING</span>
-        <span class="metric-val ${api.is_working === true ? 'status-2xx' : (api.is_working === false ? 'status-5xx' : '')}">
-          ${api.is_working === true ? 'YES 🟢' : (api.is_working === false ? 'NO 🔴' : 'PENDING ⚪')}
-        </span>
-      </div>
-      <div class="metric-cell">
-        <span class="metric-label">DATE CREATED</span>
-        <span class="metric-val" title="${api.created_at}">${formatDate(api.created_at)}</span>
-      </div>
-      <div class="metric-cell">
-        <span class="metric-label">MODIFIED</span>
-        <span class="metric-val" title="${api.updated_at}">${formatDate(api.updated_at)}</span>
-      </div>
-      <div class="metric-cell">
-        <span class="metric-label">LAST CHECKED</span>
-        <span class="metric-val" title="${api.last_checked_at || 'Never'}">
-          ${api.last_checked_at ? formatRelativeTime(api.last_checked_at) : '--'}
-        </span>
-      </div>
-    </div>
-
-    <div class="card-action-bar">
-      <button class="btn btn-primary btn-sm" onclick="triggerApiCheck(${api.id})" id="btn-check-${api.id}">
-        <span>⚡ Check Now</span>
-      </button>
-      <button class="btn btn-secondary btn-sm" onclick="openContractModal(${api.id})">
-        <span>🔍 Contract & Diffs</span>
-      </button>
-      <button class="btn btn-secondary btn-sm btn-icon-only" onclick="toggleApiPause(${api.id}, '${api.status}')" title="${api.status === 'active' ? 'Pause' : 'Resume'}">
-        ${api.status === 'active' ? '⏸' : '▶'}
-      </button>
-      <button class="btn btn-secondary btn-sm btn-icon-only" onclick="deleteApi(${api.id})" title="Delete Target">
-        🗑
-      </button>
+    <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim);">
+      <span>Last Checked: ${api.last_checked_at ? formatRelativeTime(api.last_checked_at) : 'Never'}</span>
+      <span>Status: ${api.is_working === true ? `<span style="color:var(--emerald-primary)">Working (${api.last_status_code || 200} • ${Math.round(api.last_response_time_ms || 0)}ms)</span>` : (api.is_working === false ? `<span style="color:var(--crimson-primary)">FAILING (${api.last_status_code || 'ERR'})</span>` : 'PENDING')}</span>
     </div>
   `;
 
@@ -764,9 +766,31 @@ async function deleteApi(apiId) {
 function renderEvents(severityFilter) {
   eventsFeed.innerHTML = "";
 
+  const searchInput = document.getElementById("search-events");
+  const searchQuery = searchInput ? searchInput.value.trim().toLowerCase() : "";
+  const apiFilter = document.getElementById("filter-event-api");
+  const selectedApiId = apiFilter ? apiFilter.value : "ALL";
+
   const filtered = timelineEvents.filter(ev => {
-    if (severityFilter === "ALL") return true;
-    return ev.severity === severityFilter;
+    // Severity Filter
+    const matchesSeverity = severityFilter === "ALL" || ev.severity === severityFilter;
+    
+    // API Filter
+    const matchesApi = selectedApiId === "ALL" || String(ev.tracked_api_id) === selectedApiId;
+    
+    // Search Query Filter
+    let matchesSearch = true;
+    if (searchQuery) {
+        const api = monitoredApis.find(a => a.id === ev.tracked_api_id);
+        const apiName = api ? api.name.toLowerCase() : "";
+        matchesSearch = (
+            (ev.message && ev.message.toLowerCase().includes(searchQuery)) ||
+            (ev.event_type && ev.event_type.toLowerCase().includes(searchQuery)) ||
+            apiName.includes(searchQuery)
+        );
+    }
+    
+    return matchesSeverity && matchesApi && matchesSearch;
   });
 
   if (filtered.length === 0) {
@@ -791,6 +815,9 @@ function renderEvents(severityFilter) {
     else if (ev.event_type === "endpoint_downtime") friendlyType = "🔴 SERVICE DOWN";
     else if (ev.event_type) friendlyType = ev.event_type.replace(/_/g, " ").toUpperCase();
 
+    const api = monitoredApis.find(a => a.id === ev.tracked_api_id);
+    const apiName = api ? api.name : `API #${ev.tracked_api_id}`;
+
     card.innerHTML = `
       <div class="event-severity-stripe"></div>
       <div class="event-body">
@@ -798,7 +825,10 @@ function renderEvents(severityFilter) {
           <span class="event-type-badge">${escapeHtml(friendlyType)}</span>
           <span class="event-time">${formatDate(ev.created_at)}</span>
         </div>
-        <div class="event-message" style="line-height: 1.5; margin-top: 4px;">${escapeHtml(ev.message)}</div>
+        <div style="font-size: 11px; font-weight: 700; color: #94a3b8; margin-top: 8px; margin-bottom: 4px; text-transform: uppercase;">
+          🎯 ${escapeHtml(apiName)}
+        </div>
+        <div class="event-message" style="line-height: 1.5;">${escapeHtml(ev.message)}</div>
       </div>
     `;
 
@@ -892,8 +922,20 @@ async function renderRateLimitsAndDrift() {
 function updateTelemetry() {
   valTotalApis.textContent = monitoredApis.length;
 
-  const breakingCount = timelineEvents.filter(e => e.severity === "breaking").length;
-  valBreakingDiffs.textContent = breakingCount;
+  const breakingEvents = timelineEvents.filter(e => e.severity === "breaking");
+  valBreakingDiffs.textContent = breakingEvents.length;
+  
+  const breakingPill = document.getElementById("stat-breaking-diffs");
+  if (breakingPill) {
+    if (breakingEvents.length > 0) {
+      const latestEvent = breakingEvents.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+      breakingPill.title = "Latest Issue: " + latestEvent.message;
+      breakingPill.style.cursor = "pointer";
+    } else {
+      breakingPill.title = "Did a website change how its data is organized?";
+      breakingPill.style.cursor = "default";
+    }
+  }
 
   const rateCount = timelineEvents.filter(e => e.event_type === "rate_limit_warning").length;
   valRateAlerts.textContent = rateCount;
@@ -949,10 +991,19 @@ async function loadModalContractData(apiId) {
   const schemaCodeEl = document.getElementById("current-schema-code");
   const diffsContainer = document.getElementById("diff-records-container");
   const snapshotsTable = document.getElementById("snapshots-table-body");
+  const deepHistoryContainer = document.getElementById("deep-history-container");
+  const btnDeepHistory = document.getElementById("btn-deep-history");
 
   schemaCodeEl.innerHTML = `<span style="color: var(--text-dim);">Loading schema...</span>`;
   diffsContainer.innerHTML = `<span style="color: var(--text-dim);">Loading diff history...</span>`;
   snapshotsTable.innerHTML = `<tr><td colspan="4" style="text-align: center;">Loading snapshots...</td></tr>`;
+  
+  if (deepHistoryContainer) deepHistoryContainer.innerHTML = "";
+  if (btnDeepHistory) {
+    btnDeepHistory.disabled = false;
+    btnDeepHistory.innerHTML = `<span class="btn-icon">🔍</span> Deep Scan Web Archives`;
+    btnDeepHistory.style.display = "flex";
+  }
 
   try {
     // 1. Fetch snapshots
@@ -1002,7 +1053,9 @@ async function loadModalContractData(apiId) {
           <td>${formatDate(s.checked_at)}</td>
           <td><span class="badge ${s.status_code >= 200 && s.status_code < 300 ? 'badge-method-get' : 'badge-method-delete'}">${s.status_code}</span></td>
           <td style="color: var(--text-pure);">${s.response_time_ms} ms</td>
-          <td style="color: var(--text-dim); font-size: 11px;">${s.headers_snapshot ? Object.keys(s.headers_snapshot).length + ' headers' : '--'}</td>
+          <td style="color: var(--text-dim); font-size: 11px;">
+            ${s.headers_snapshot ? `<span title="${escapeHtml(Object.entries(s.headers_snapshot).map(([k, v]) => `${k}: ${v}`).join('\\n'))}" style="border-bottom: 1px dotted var(--text-dim); cursor: help;">${Object.keys(s.headers_snapshot).length} headers</span>` : '--'}
+          </td>
         `;
         snapshotsTable.appendChild(tr);
       });
@@ -1013,17 +1066,68 @@ async function loadModalContractData(apiId) {
     const diffs = dRes.ok ? await dRes.json() : [];
 
     diffsContainer.innerHTML = "";
+    
+    // Inject a small style block if it doesn't exist to handle timeline line properly
+    if (!document.getElementById("timeline-styles")) {
+      const style = document.createElement("style");
+      style.id = "timeline-styles";
+      style.textContent = `
+        .custom-timeline {
+          position: relative;
+          padding-left: 20px;
+          margin: 10px 4px;
+          padding-top: 4px;
+        }
+        .custom-timeline::before {
+          content: '';
+          position: absolute;
+          left: 3px;
+          top: 10px;
+          bottom: 24px;
+          width: 2px;
+          background: var(--border-hairline);
+        }
+        .custom-timeline-node {
+          position: relative;
+          margin-bottom: 24px;
+        }
+        .custom-timeline-dot {
+          position: absolute;
+          left: -21px;
+          top: 4px;
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          box-shadow: 0 0 0 4px var(--bg-surface);
+          z-index: 1;
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    const timelineWrapper = document.createElement("div");
+    timelineWrapper.className = "custom-timeline";
+
     if (diffs.length === 0) {
-      diffsContainer.innerHTML = `<div style="color: var(--text-muted); padding: 24px; text-align: center;">✅ No changes detected. The data structure from this API has remained completely steady.</div>`;
+      const emptyMsg = document.createElement("div");
+      emptyMsg.className = "custom-timeline-node";
+      emptyMsg.style.color = "var(--text-muted)";
+      emptyMsg.innerHTML = `
+        <span class="custom-timeline-dot" style="background: var(--text-muted);"></span>
+        <div>✅ No schema changes detected yet. The data structure has remained completely steady.</div>
+      `;
+      timelineWrapper.appendChild(emptyMsg);
     } else {
       diffs.forEach(diff => {
-        const diffCard = document.createElement("div");
-        diffCard.className = `diff-record-card diff-${diff.severity}`;
+        const diffNode = document.createElement("div");
+        diffNode.className = "custom-timeline-node";
         
         const isBreaking = diff.severity === "breaking";
         const badgeColor = isBreaking ? "badge-method-delete" : (diff.severity === "medium" ? "badge-warning" : "badge-method-get");
         const severityLabel = isBreaking ? "⚠️ POTENTIALLY BREAKING CHANGE" : (diff.severity === "medium" ? "⚠️ WARNING" : "ℹ️ MINOR UPDATE");
         
+        let dotColor = isBreaking ? "var(--crimson-primary)" : (diff.severity === "medium" ? "var(--amber-primary)" : "var(--emerald-primary)");
+
         // Parse friendly description of what actually changed
         let explanationHtml = "";
         const summary = diff.diff_summary;
@@ -1062,18 +1166,34 @@ async function loadModalContractData(apiId) {
           explanationHtml = `<div style="color: var(--text-dim);">Detailed change: ${escapeHtml(String(summary))}</div>`;
         }
 
-        diffCard.innerHTML = `
-          <div class="diff-record-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-            <span class="badge ${badgeColor}" style="font-size:11px; padding:4px 8px;">${severityLabel}</span>
-            <span style="font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);">${formatDate(diff.detected_at)}</span>
-          </div>
-          <div style="font-size: 13.5px; line-height: 1.5; color: var(--text-pure);">
-            ${explanationHtml}
+        diffNode.innerHTML = `
+          <span class="custom-timeline-dot" style="background: ${dotColor}; top: 12px;"></span>
+          <div class="diff-record-card diff-${diff.severity}" style="margin-top: 0;">
+            <div class="diff-record-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <span class="badge ${badgeColor}" style="font-size:11px; padding:4px 8px;">${severityLabel}</span>
+              <span style="font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);">${formatDate(diff.detected_at)}</span>
+            </div>
+            <div style="font-size: 13.5px; line-height: 1.5; color: var(--text-pure);">
+              ${explanationHtml}
+            </div>
           </div>
         `;
-        diffsContainer.appendChild(diffCard);
+        timelineWrapper.appendChild(diffNode);
       });
     }
+
+    // Add Tracking Started Node at the bottom
+    const startNode = document.createElement("div");
+    startNode.className = "custom-timeline-node";
+    startNode.style.marginBottom = "0"; // so the line ends right here
+    startNode.innerHTML = `
+      <span class="custom-timeline-dot" style="background: #38bdf8; top: 6px;"></span>
+      <div style="font-size: 13px; color: var(--text-pure); margin-bottom: 4px;">🚀 API Tracking Started</div>
+      <div style="font-size: 11px; color: var(--text-dim);">${formatDate(selectedApi.created_at)}</div>
+    `;
+    timelineWrapper.appendChild(startNode);
+
+    diffsContainer.appendChild(timelineWrapper);
 
   } catch (err) {
     schemaCodeEl.textContent = "Failed to load contract details: " + err.message;
@@ -1113,35 +1233,34 @@ function renderInteractiveJsonTree(schema, isRoot = true) {
   if (typeof schema === "string") {
     let friendly = schema;
     if (schema.toLowerCase() === "str") friendly = "Text";
-    else if (schema.toLowerCase() === "int") friendly = "Number (Whole)";
-    else if (schema.toLowerCase() === "float") friendly = "Number (Decimal)";
-    else if (schema.toLowerCase() === "bool") friendly = "Yes/No (Boolean)";
+    else if (schema.toLowerCase() === "int") friendly = "Number";
+    else if (schema.toLowerCase() === "float") friendly = "Decimal";
+    else if (schema.toLowerCase() === "bool") friendly = "Yes/No";
     else if (schema.toLowerCase() === "nonetype" || schema.toLowerCase() === "none") friendly = "Empty";
     
-    return `<span style="color:#10b981; font-weight: 500;">${friendly}</span>`;
+    return `<span style="color: #94a3b8; font-size: 13px; font-weight: normal; margin-left: 6px;">(${friendly})</span>`;
   }
 
   if (Array.isArray(schema)) {
-    if (schema.length === 0) return `<span style="color:#9ca3af; font-style: italic;">Empty List</span>`;
-    return `<div style="margin-left: 20px; border-left: 2px solid #374151; padding-left: 10px; margin-top: 5px;">
-              <div style="font-style: italic; color: #9ca3af; margin-bottom: 4px;">A list of items that contain:</div>
+    if (schema.length === 0) return `<span style="color: #94a3b8; font-size: 13px; font-weight: normal; margin-left: 6px;">(Empty List)</span>`;
+    return `<span style="color: #94a3b8; font-size: 13px; font-style: italic; font-weight: normal; margin-left: 6px;">(List of items containing:)</span>
+            <div style="margin-left: 8px; border-left: 2px solid #334155; padding-left: 16px; margin-top: 6px; margin-bottom: 6px;">
               ${renderInteractiveJsonTree(schema[0], false)}
             </div>`;
   }
 
   if (typeof schema === "object") {
     const keys = Object.keys(schema);
-    if (keys.length === 0) return `<span style="color:#9ca3af; font-style: italic;">Empty Group</span>`;
+    if (keys.length === 0) return `<span style="color: #94a3b8; font-size: 13px; font-weight: normal; margin-left: 6px;">(Empty)</span>`;
 
-    let out = `<ul style="list-style-type: none; padding-left: 20px; border-left: 2px solid #374151; margin-top: 5px; margin-bottom: 5px;">`;
+    let out = `<ul style="list-style-type: ${isRoot ? 'none' : 'disc'}; padding-left: ${isRoot ? '0' : '24px'}; margin-top: 4px; margin-bottom: 4px; color: #e2e8f0; line-height: 1.7;">`;
     keys.forEach(k => {
-      out += `<li style="margin-bottom: 6px;">
-                <strong style="color:var(--text-pure);">${escapeHtml(k)}</strong> contains 
-                ${renderInteractiveJsonTree(schema[k], false)}
+      out += `<li style="margin-bottom: 4px;">
+                <strong style="color: #38bdf8; font-size: 14px;">${escapeHtml(k)}</strong> ${renderInteractiveJsonTree(schema[k], false)}
               </li>`;
     });
     out += `</ul>`;
-    return isRoot ? `<div style="font-family: system-ui, sans-serif; font-size: 14px;">${out}</div>` : out;
+    return isRoot ? `<div style="font-family: system-ui, -apple-system, sans-serif; font-size: 14px;">${out}</div>` : out;
   }
 
   return escapeHtml(String(schema));
@@ -1275,7 +1394,7 @@ async function triggerInstantAutoTrack(url, name, method = "GET", isSandbox = fa
 
     const created = await res.json();
     appendTerminalLog("✅", `[CONTRACT LEARNED] Contract established & verified`);
-    appendTerminalLog("🚀", `[AEGIS ENGINE] Background observer scheduled every ${created.check_interval_minutes}m`);
+    appendTerminalLog("🚀", `[TPROTECTOR ENGINE] Background observer scheduled every ${created.check_interval_minutes}m`);
 
     showToast(`⚡ Auto-onboarded "${created.name}"! Monitoring active.`);
     
@@ -1327,7 +1446,7 @@ async function handleAutoScanSubmit(e) {
   } else if (rawInput.toLowerCase().startsWith("curl")) {
     appendTerminalLog("📟", `[cURL PARSER] Parsing cURL command: Extracting URL, headers, and request payload...`);
   } else {
-    appendTerminalLog("⚡", `[AEGIS RADAR] Auto-probing target endpoint: ${rawInput}`);
+    appendTerminalLog("⚡", `[TPROTECTOR RADAR] Auto-probing target endpoint: ${rawInput}`);
   }
 
   appendTerminalLog("🌐", `[HTTP CLIENT] Measuring handshake latency & inspecting response...`);
@@ -1396,6 +1515,24 @@ async function handleAutoScanSubmit(e) {
     const resIntervalBadge = document.getElementById("res-interval-badge");
     if (resIntervalBadge) resIntervalBadge.textContent = `Every ${selectedCheckInterval}m`;
 
+    const targetUrl = data.resolved_url || data.raw_url || `${data.base_url}${data.endpoint_path}`;
+    const isAlreadyTracked = monitoredApis.some(api => {
+      const apiUrl = `${api.base_url.replace(/\/$/, "")}/${api.endpoint_path.replace(/^\//, "")}`;
+      return apiUrl === targetUrl || apiUrl === data.raw_url;
+    });
+
+    if (isAlreadyTracked) {
+      btnConfirmAutoTrack.disabled = true;
+      btnConfirmAutoTrack.innerHTML = `<span>⚠️ Already Tracked</span>`;
+      btnConfirmAutoTrack.style.opacity = "0.5";
+      btnConfirmAutoTrack.style.cursor = "not-allowed";
+    } else {
+      btnConfirmAutoTrack.disabled = false;
+      btnConfirmAutoTrack.innerHTML = `<span>⚡ Confirm & Start Observing</span>`;
+      btnConfirmAutoTrack.style.opacity = "1";
+      btnConfirmAutoTrack.style.cursor = "pointer";
+    }
+
     autoProbeResult.classList.remove("hidden");
 
   } catch (err) {
@@ -1411,7 +1548,7 @@ async function handleAutoScanSubmit(e) {
  * Confirm button on Probe Result card: registers the probed API
  */
 async function handleConfirmAutoTrack() {
-  if (!currentProbeData) return;
+  if (!currentProbeData || btnConfirmAutoTrack.disabled) return;
 
   const feedbackBanner = document.getElementById("probe-track-feedback");
   if (feedbackBanner) {
@@ -1816,9 +1953,20 @@ function renderDiscoveredEndpoints() {
           <span class="disc-latency-tag">${cleanLatency} ms</span>
         </td>
         <td style="text-align: center; white-space: nowrap;">
-          <button class="btn btn-sm btn-primary btn-track-sm" onclick="trackDiscoveredEndpoint('${encodeURIComponent(ep.url)}', '${encodeURIComponent(ep.service_name)}', this)">
-            + Track
-          </button>
+          ${(() => {
+            const trackedApi = monitoredApis ? monitoredApis.find(a => {
+              const bUrl = a.base_url || "";
+              const ePath = a.endpoint_path || "";
+              const fullTrackedUrl = `${bUrl.replace(/\/$/, "")}/${ePath.replace(/^\//, "")}`;
+              const epUrl = ep.url || "";
+              return fullTrackedUrl.toLowerCase() === epUrl.toLowerCase();
+            }) : null;
+            if (trackedApi) {
+              return `<button class="btn btn-sm btn-success btn-track-sm" disabled style="opacity: 0.6; cursor: not-allowed;" title="Already monitored">✓ Tracked (${trackedApi.check_interval_minutes}m)</button>`;
+            } else {
+              return `<button class="btn btn-sm btn-primary btn-track-sm" onclick="trackDiscoveredEndpoint('${encodeURIComponent(ep.url || "")}', '${encodeURIComponent(ep.service_name || "")}', this)">+ Track</button>`;
+            }
+          })()}
         </td>
       </tr>
     `;
@@ -1986,4 +2134,165 @@ async function confirmTrackFromIntervalModal() {
   }
 }
 
+async function fetchDeepHistory() {
+  if (!selectedApi) return;
+  const btn = document.getElementById("btn-deep-history");
+  const container = document.getElementById("deep-history-container");
+  
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="btn-icon">⏳</span> Scanning the Web Archive...`;
+  }
+  
+  try {
+    const res = await fetch(`${API_BASE}/apis/${selectedApi.id}/deep-history`);
+    if (!res.ok) {
+      if (res.status === 404) {
+        const timelineWrapper = document.createElement("div");
+        timelineWrapper.className = "custom-timeline";
+        
+        const emptyNode = document.createElement("div");
+        emptyNode.className = "custom-timeline-node";
+        emptyNode.innerHTML = `
+          <span class="custom-timeline-dot" style="background: var(--text-muted); top: 6px;"></span>
+          <div style="color: var(--text-muted); font-size: 13px; margin-bottom: 20px;">No historical archive data found in the Wayback Machine for this URL.</div>
+        `;
+        timelineWrapper.appendChild(emptyNode);
+        
+        // Add connector to the local timeline
+        const connectorNode = document.createElement("div");
+        connectorNode.className = "custom-timeline-node";
+        connectorNode.style.marginBottom = "0";
+        connectorNode.innerHTML = `
+          <span class="custom-timeline-dot" style="background: var(--amethyst-primary); top: 6px;"></span>
+          <div style="font-size: 12px; color: var(--amethyst-primary); margin-bottom: 4px;">⬇️ Handed over to Local Tracking</div>
+        `;
+        timelineWrapper.appendChild(connectorNode);
+
+        container.innerHTML = "";
+        container.appendChild(timelineWrapper);
+        
+        if (btn) btn.style.display = "none";
+        return;
+      }
+      throw new Error(`Failed to fetch deep history (${res.status})`);
+    }
+    
+    const history = await res.json();
+    
+    // Build deep history timeline
+    const timelineWrapper = document.createElement("div");
+    timelineWrapper.className = "custom-timeline";
+    timelineWrapper.style.borderLeft = "2px dashed var(--amethyst-primary)"; // Distinguish it as deep history
+    
+    // Title header for deep history
+    const headerNode = document.createElement("div");
+    headerNode.className = "custom-timeline-node";
+    headerNode.innerHTML = `
+      <span class="custom-timeline-dot" style="background: var(--amethyst-primary); top: 6px; box-shadow: 0 0 0 4px var(--amethyst-glow);"></span>
+      <div style="font-size: 14px; color: var(--amethyst-primary); margin-bottom: 4px; font-weight: bold;">🌐 Deep Web History Located</div>
+      <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 20px;">First seen on the wide web: ${formatDate(history.first_seen_at)}</div>
+    `;
+    timelineWrapper.appendChild(headerNode);
+
+    if (history.diffs && history.diffs.length > 0) {
+      history.diffs.forEach(diff => {
+        const diffNode = document.createElement("div");
+        diffNode.className = "custom-timeline-node";
+        
+        const isBreaking = diff.severity === "breaking";
+        const badgeColor = isBreaking ? "badge-method-delete" : (diff.severity === "medium" ? "badge-warning" : "badge-method-get");
+        const severityLabel = isBreaking ? "⚠️ POTENTIALLY BREAKING CHANGE" : (diff.severity === "medium" ? "⚠️ WARNING" : "ℹ️ MINOR UPDATE");
+        let dotColor = isBreaking ? "var(--crimson-primary)" : (diff.severity === "medium" ? "var(--amber-primary)" : "var(--emerald-primary)");
+
+        let explanationHtml = "";
+        const summary = diff.diff_summary;
+
+        if (summary && typeof summary === "object") {
+          let items = [];
+          if (summary.dictionary_item_removed || summary.iterable_item_removed) {
+            const removed = summary.dictionary_item_removed || summary.iterable_item_removed;
+            items.push(`<div style="color: #ef4444; margin-bottom: 6px;">
+              <strong>Field Removed:</strong> <code>${escapeHtml(JSON.stringify(removed))}</code>
+            </div>`);
+          }
+          if (summary.type_changes) {
+            items.push(`<div style="color: #f59e0b; margin-bottom: 6px;">
+              <strong>Data Type Changed:</strong> <code>${escapeHtml(JSON.stringify(summary.type_changes))}</code>
+            </div>`);
+          }
+          if (summary.values_changed) {
+            items.push(`<div style="color: #f59e0b; margin-bottom: 6px;">
+              <strong>Structure Shift:</strong> <code>${escapeHtml(JSON.stringify(summary.values_changed))}</code>
+            </div>`);
+          }
+          if (summary.dictionary_item_added || summary.iterable_item_added) {
+            const added = summary.dictionary_item_added || summary.iterable_item_added;
+            items.push(`<div style="color: #10b981; margin-bottom: 6px;">
+              <strong>New Field Added:</strong> <code>${escapeHtml(JSON.stringify(added))}</code>
+            </div>`);
+          }
+
+          if (items.length > 0) {
+            explanationHtml = items.join("");
+          } else {
+            explanationHtml = `<pre class="diff-summary-pre">${escapeHtml(JSON.stringify(summary, null, 2))}</pre>`;
+          }
+        } else {
+          explanationHtml = `<div style="color: var(--text-dim);">Detailed change: ${escapeHtml(String(summary))}</div>`;
+        }
+
+        diffNode.innerHTML = `
+          <span class="custom-timeline-dot" style="background: ${dotColor}; top: 12px;"></span>
+          <div class="diff-record-card diff-${diff.severity}" style="margin-top: 0; border: 1px dashed var(--border-hairline);">
+            <div class="diff-record-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <span class="badge ${badgeColor}" style="font-size:11px; padding:4px 8px;">${severityLabel}</span>
+              <span style="font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);">${formatDate(diff.detected_at)}</span>
+            </div>
+            <div style="font-size: 13.5px; line-height: 1.5; color: var(--text-pure);">
+              ${explanationHtml}
+            </div>
+          </div>
+        `;
+        timelineWrapper.appendChild(diffNode);
+      });
+    } else {
+       const emptyNode = document.createElement("div");
+       emptyNode.className = "custom-timeline-node";
+       emptyNode.innerHTML = `
+        <span class="custom-timeline-dot" style="background: var(--text-muted); top: 12px;"></span>
+        <div style="color: var(--text-muted); margin-left: 10px; font-size: 13px;">No schema changes detected in the public archive during this period.</div>
+       `;
+       timelineWrapper.appendChild(emptyNode);
+    }
+    
+    // Add connector to the local timeline
+    const connectorNode = document.createElement("div");
+    connectorNode.className = "custom-timeline-node";
+    connectorNode.style.marginBottom = "0";
+    connectorNode.innerHTML = `
+      <span class="custom-timeline-dot" style="background: var(--amethyst-primary); top: 6px;"></span>
+      <div style="font-size: 12px; color: var(--amethyst-primary); margin-bottom: 4px;">⬇️ Handed over to Local Tracking</div>
+    `;
+    timelineWrapper.appendChild(connectorNode);
+
+    container.innerHTML = "";
+    container.appendChild(timelineWrapper);
+    
+    // Hide the button after successful fetch
+    if (btn) btn.style.display = "none";
+    
+  } catch (err) {
+    if (btn) {
+      btn.innerHTML = `<span class="btn-icon">❌</span> ${escapeHtml(err.message)}`;
+      btn.classList.replace("btn-primary", "btn-danger");
+      // Allow retry after 3 seconds
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.innerHTML = `<span class="btn-icon">🔍</span> Retry Deep Scan`;
+        btn.classList.replace("btn-danger", "btn-primary");
+      }, 3000);
+    }
+  }
+}
 
