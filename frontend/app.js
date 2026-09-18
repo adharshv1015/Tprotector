@@ -1801,6 +1801,9 @@ async function runWebsiteAnalysis(urlOverride = null) {
   const t3 = setTimeout(() => { if (step3) step3.className = "step-chip step-active"; }, 750);
   const t4 = setTimeout(() => { if (step4) step4.className = "step-chip step-active"; }, 1300);
 
+  let scanFailed = false;
+  let scanErrorMsg = "";
+
   try {
     const res = await fetch(`${API_BASE}/apis/discover-website-apis`, {
       method: "POST",
@@ -1816,7 +1819,7 @@ async function runWebsiteAnalysis(urlOverride = null) {
     const report = await res.json();
 
     if (titleEl) titleEl.textContent = `API Inventory: ${report.normalized_base}`;
-    if (subEl) subEl.textContent = `Discovered ${report.total_discovered} service endpoints on ${report.normalized_base}`;
+    if (subEl) subEl.textContent = `Discovered ${report.discovered_endpoints_count} service endpoints on ${report.normalized_base}`;
 
     // Populate Metrics
     document.getElementById("disc-val-total").textContent = report.total_endpoints;
@@ -1838,13 +1841,62 @@ async function runWebsiteAnalysis(urlOverride = null) {
     showToast(`Discovered ${report.total_endpoints} services (${report.online_count} online, ${report.protected_count} protected)`);
 
   } catch (err) {
+    scanFailed = true;
+    scanErrorMsg = err.message;
     showToast("Discovery error: " + err.message, "error");
   } finally {
     clearTimeout(t2);
     clearTimeout(t3);
     clearTimeout(t4);
-    if (loadingEl) loadingEl.classList.add("hidden");
-    if (resultsEl) resultsEl.style.opacity = "1";
+    
+    if (scanFailed) {
+      // Show error state in pipeline
+      if (loadingEl) {
+        loadingEl.classList.remove("hidden");
+        const titleEl = loadingEl.querySelector("h4");
+        if (titleEl) {
+          titleEl.textContent = `Pipeline Failed: ${scanErrorMsg}`;
+          titleEl.style.color = "#ef4444";
+        }
+        const tagEl = loadingEl.querySelector(".pulse-tag");
+        if (tagEl) {
+          tagEl.textContent = "ERROR";
+          tagEl.style.background = "rgba(239, 68, 68, 0.2)";
+          tagEl.style.color = "#ef4444";
+          tagEl.style.border = "1px solid #ef4444";
+        }
+        // Turn active steps red
+        [step1, step2, step3, step4].forEach(step => {
+          if (step && step.classList.contains("step-active")) {
+            step.classList.remove("step-active");
+            step.classList.add("step-error");
+          }
+        });
+      }
+      if (resultsEl) resultsEl.style.opacity = "0.2";
+    } else {
+      // Reset and hide on success
+      if (loadingEl) loadingEl.classList.add("hidden");
+      const titleEl = loadingEl?.querySelector("h4");
+      if (titleEl) {
+        titleEl.textContent = "Deep Intelligence Pipeline Running...";
+        titleEl.style.color = "";
+      }
+      const tagEl = loadingEl?.querySelector(".pulse-tag");
+      if (tagEl) {
+        tagEl.textContent = "ACTIVE SCAN";
+        tagEl.style.background = "";
+        tagEl.style.color = "";
+        tagEl.style.border = "";
+      }
+      [step1, step2, step3, step4].forEach(step => {
+        if (step) {
+          step.classList.remove("step-error");
+        }
+      });
+      if (resultsEl) resultsEl.style.opacity = "1";
+    }
+
     if (btnRun) {
       btnRun.disabled = false;
       btnRun.innerHTML = `<span class="btn-icon">⚡</span> CRAWL & ANALYZE APIS`;
@@ -2196,7 +2248,7 @@ async function fetchDeepHistory() {
     timelineWrapper.appendChild(headerNode);
 
     if (history.diffs && history.diffs.length > 0) {
-      history.diffs.forEach(diff => {
+      history.diffs.forEach((diff, index) => {
         const diffNode = document.createElement("div");
         diffNode.className = "custom-timeline-node";
         
@@ -2208,7 +2260,7 @@ async function fetchDeepHistory() {
         let explanationHtml = "";
         const summary = diff.diff_summary;
 
-        if (summary && typeof summary === "object") {
+        if (summary && typeof summary === "object" && !summary.header_update) {
           let items = [];
           if (summary.dictionary_item_removed || summary.iterable_item_removed) {
             const removed = summary.dictionary_item_removed || summary.iterable_item_removed;
@@ -2238,9 +2290,129 @@ async function fetchDeepHistory() {
           } else {
             explanationHtml = `<pre class="diff-summary-pre">${escapeHtml(JSON.stringify(summary, null, 2))}</pre>`;
           }
-        } else {
+        } else if (summary && !summary.header_update) {
           explanationHtml = `<div style="color: var(--text-dim);">Detailed change: ${escapeHtml(String(summary))}</div>`;
         }
+
+        // --- STAGE 1: HEADER TRACKING UI ---
+        if (diff.header_changes) {
+          const catMap = {};
+          
+          const getCat = (h) => {
+            if (h.includes("ratelimit")) return { id: "rate", icon: "🚦", title: "Rate Limiting" };
+            if (h.includes("access-control")) return { id: "cors", icon: "🌐", title: "CORS" };
+            if (h.includes("security") || h.includes("transport") || h.includes("policy") || h.includes("options")) return { id: "sec", icon: "🛡️", title: "Security" };
+            return { id: "infra", icon: "⚙️", title: "Infrastructure" };
+          };
+
+          const addChange = (header, type, val) => {
+            const c = getCat(header);
+            if (!catMap[c.id]) catMap[c.id] = { icon: c.icon, title: c.title, items: [] };
+            catMap[c.id].items.push({ header, type, val });
+          };
+
+          if (diff.header_changes.added) {
+            Object.entries(diff.header_changes.added).forEach(([k, v]) => addChange(k, 'added', v));
+          }
+          if (diff.header_changes.removed) {
+            Object.entries(diff.header_changes.removed).forEach(([k, v]) => addChange(k, 'removed', v));
+          }
+          if (diff.header_changes.changed) {
+            Object.entries(diff.header_changes.changed).forEach(([k, v]) => addChange(k, 'changed', v));
+          }
+
+          let headerHtml = `<div style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border-hairline);">`;
+          Object.values(catMap).forEach(cat => {
+            headerHtml += `<div style="margin-bottom: 8px;">`;
+            headerHtml += `<div style="font-size: 12px; font-weight: bold; color: var(--amethyst-primary); margin-bottom: 4px;">${cat.icon} ${cat.title} Changes</div>`;
+            cat.items.forEach(item => {
+              if (item.type === 'added') {
+                headerHtml += `<div style="font-size: 12px; color: #10b981; font-family: var(--font-mono); margin-bottom: 2px;">+ ${item.header}</div>`;
+              } else if (item.type === 'removed') {
+                headerHtml += `<div style="font-size: 12px; color: #ef4444; font-family: var(--font-mono); text-decoration: line-through; margin-bottom: 2px;">- ${item.header}</div>`;
+              } else if (item.type === 'changed') {
+                headerHtml += `<div style="font-size: 12px; color: #f59e0b; font-family: var(--font-mono); margin-bottom: 2px;">↻ ${item.header}: <span style="color:var(--text-dim);">${escapeHtml(item.val.old)}</span> → <span>${escapeHtml(item.val.new)}</span></div>`;
+              }
+            });
+            headerHtml += `</div>`;
+          });
+          headerHtml += `</div>`;
+          
+          explanationHtml += headerHtml;
+        }
+
+        // --- STAGE 3: VULNERABILITY ARCHEOLOGY UI ---
+        if (diff.historical_leaks && diff.historical_leaks.length > 0) {
+          let leakHtml = `<div class="historical-leak-banner" style="margin-top: 10px; margin-bottom: 15px; padding: 12px; background: rgba(220, 38, 38, 0.15); border: 1px solid var(--crimson-primary); border-radius: 6px; box-shadow: 0 0 12px rgba(220, 38, 38, 0.3);">`;
+          leakHtml += `<div style="font-weight: bold; color: var(--crimson-primary); margin-bottom: 5px; font-size: 13px;">🚨 HISTORICAL DATA LEAK DETECTED</div>`;
+          leakHtml += `<div style="font-size: 12px; color: var(--text-pure); margin-bottom: 8px;">The following sensitive fields were exposed in this snapshot before being removed:</div>`;
+          leakHtml += `<ul style="margin: 0 0 0 20px; padding: 0; font-size: 12px; color: var(--crimson-primary); font-family: var(--font-mono);">`;
+          diff.historical_leaks.forEach(leak => {
+            leakHtml += `<li>${escapeHtml(leak)}</li>`;
+          });
+          leakHtml += `</ul></div>`;
+          
+          explanationHtml = leakHtml + explanationHtml;
+          dotColor = "var(--crimson-primary)";
+          diffNode.style.animation = "pulse-critical 2s infinite";
+        }
+        // --- STAGE 4: PAYLOAD BLOAT UI ---
+        let payloadBloatHtml = "";
+        if (diff.payload_bytes !== undefined && diff.payload_bytes !== null) {
+          const currentKb = (diff.payload_bytes / 1024).toFixed(2);
+          let bloatSpan = "";
+          const prevDiff = history.diffs[index + 1];
+          if (prevDiff && prevDiff.payload_bytes !== undefined && prevDiff.payload_bytes !== null) {
+            const deltaBytes = diff.payload_bytes - prevDiff.payload_bytes;
+            if (deltaBytes > 0) {
+              bloatSpan = `<span style="color: #ef4444; margin-left: 10px;" title="Payload grew in size">▲ +${(deltaBytes / 1024).toFixed(2)} KB</span>`;
+            } else if (deltaBytes < 0) {
+              bloatSpan = `<span style="color: #10b981; margin-left: 10px;" title="Payload shrunk in size">▼ ${(deltaBytes / 1024).toFixed(2)} KB</span>`;
+            } else {
+              bloatSpan = `<span style="color: var(--text-dim); margin-left: 10px;">(Unchanged)</span>`;
+            }
+          }
+          payloadBloatHtml = `<div style="font-size: 11px; color: var(--text-pure); margin-top: 12px; padding: 6px 10px; background: rgba(255,255,255,0.03); border: 1px dashed var(--border-hairline); border-radius: 4px; display: inline-block;">📦 Payload Size: <strong>${currentKb} KB</strong> ${bloatSpan}</div>`;
+          explanationHtml += payloadBloatHtml;
+        }
+
+        // --- STAGE 5: FORMAT EVOLUTION UI ---
+        if (diff.format_evolution) {
+          let formatHtml = `<div style="margin-top: 15px; margin-bottom: 15px; padding: 12px; background: rgba(139, 92, 246, 0.15); border: 1px solid var(--amethyst-primary); border-radius: 6px; box-shadow: 0 0 15px rgba(139, 92, 246, 0.3);">`;
+          formatHtml += `<div style="font-weight: bold; color: var(--amethyst-primary); margin-bottom: 5px; font-size: 13px;">🔄 DATA FORMAT EVOLVED</div>`;
+          formatHtml += `<div style="font-size: 12px; color: var(--text-pure); margin-bottom: 8px;">The API transitioned between primary data interchange formats:</div>`;
+          formatHtml += `<div style="font-size: 13px; font-family: var(--font-mono); text-align: center; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px;">`;
+          formatHtml += `<span style="color: #ef4444; text-decoration: line-through;">${escapeHtml(diff.format_evolution.old)}</span>`;
+          formatHtml += `<span style="margin: 0 10px; color: var(--text-muted);">➔</span>`;
+          formatHtml += `<span style="color: #10b981; font-weight: bold;">${escapeHtml(diff.format_evolution.new)}</span>`;
+          formatHtml += `</div></div>`;
+          
+          explanationHtml = formatHtml + explanationHtml;
+          dotColor = "var(--amethyst-primary)";
+          diffNode.style.animation = "pulse-amethyst 2s infinite";
+        }
+
+        // --- STAGE 6: RATE LIMIT EROSION UI ---
+        if (diff.rate_limit_erosion) {
+          const oldLimit = diff.rate_limit_erosion.old;
+          const newLimit = diff.rate_limit_erosion.new;
+          const pctDrop = Math.round(((oldLimit - newLimit) / oldLimit) * 100);
+          
+          let erosionHtml = `<div style="margin-top: 15px; margin-bottom: 15px; padding: 12px; background: rgba(245, 158, 11, 0.15); border: 1px solid var(--amber-primary); border-radius: 6px;">`;
+          erosionHtml += `<div style="font-weight: bold; color: var(--amber-primary); margin-bottom: 5px; font-size: 13px;">📉 RATE LIMIT ERODED</div>`;
+          erosionHtml += `<div style="font-size: 12px; color: var(--text-pure); margin-bottom: 8px;">API limits were aggressively restricted, dropping by <strong>${pctDrop}%</strong>:</div>`;
+          erosionHtml += `<div style="font-size: 13px; font-family: var(--font-mono); display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.2); padding: 8px 12px; border-radius: 4px;">`;
+          erosionHtml += `<span style="color: #10b981;">${oldLimit}/hr</span>`;
+          erosionHtml += `<span style="color: var(--amber-primary);">➔</span>`;
+          erosionHtml += `<span style="color: #ef4444; font-weight: bold;">${newLimit}/hr</span>`;
+          erosionHtml += `</div></div>`;
+          
+          explanationHtml = erosionHtml + explanationHtml;
+          if (dotColor !== "var(--crimson-primary)" && dotColor !== "var(--amethyst-primary)") {
+            dotColor = "var(--amber-primary)";
+          }
+        }
+
 
         diffNode.innerHTML = `
           <span class="custom-timeline-dot" style="background: ${dotColor}; top: 12px;"></span>
@@ -2261,7 +2433,7 @@ async function fetchDeepHistory() {
        emptyNode.className = "custom-timeline-node";
        emptyNode.innerHTML = `
         <span class="custom-timeline-dot" style="background: var(--text-muted); top: 12px;"></span>
-        <div style="color: var(--text-muted); margin-left: 10px; font-size: 13px;">No schema changes detected in the public archive during this period.</div>
+        <div style="color: var(--text-muted); margin-left: 10px; font-size: 13px;">No schema or header changes detected in the public archive during this period.</div>
        `;
        timelineWrapper.appendChild(emptyNode);
     }
@@ -2291,6 +2463,83 @@ async function fetchDeepHistory() {
         btn.disabled = false;
         btn.innerHTML = `<span class="btn-icon">🔍</span> Retry Deep Scan`;
         btn.classList.replace("btn-danger", "btn-primary");
+      }, 3000);
+    }
+  }
+}
+
+async function fetchTopologyArcheology() {
+  if (!selectedApi) return;
+  const btn = document.getElementById("btn-ghost-endpoints");
+  const container = document.getElementById("topology-archeology-container");
+  
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="btn-icon spin">⟳</span> Probing Historical Topology...`;
+  }
+  
+  try {
+    const res = await fetch(`${API_BASE}/apis/${selectedApi.id}/topology-archeology`);
+    if (!res.ok) {
+      if (res.status === 404) {
+         container.innerHTML = `<div style="color: var(--text-muted); font-size: 13px; margin-bottom: 20px; padding: 10px; border: 1px dashed var(--border-hairline); border-radius: 8px;">No historical topology data found for this domain.</div>`;
+         if (btn) btn.style.display = "none";
+         return;
+      }
+      throw new Error(`Failed to fetch topology (${res.status})`);
+    }
+    
+    const topology = await res.json();
+    let html = `<div style="border: 1px dashed var(--amber-dim); padding: 15px; border-radius: 8px; margin-bottom: 20px; background: rgba(245, 158, 11, 0.05);">`;
+    html += `<div style="font-size: 14px; color: var(--amber-primary); font-weight: bold; margin-bottom: 15px;">👻 Domain Topology Archeology</div>`;
+    
+    if (topology.ghost_endpoints && topology.ghost_endpoints.length > 0) {
+      html += `<div style="margin-bottom: 15px;">
+        <div style="font-size: 12px; font-weight: bold; color: var(--crimson-primary); margin-bottom: 8px;">❌ Dead / Ghost Endpoints (404, 500)</div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+          <tbody>`;
+      topology.ghost_endpoints.forEach(ep => {
+        html += `<tr style="border-bottom: 1px solid var(--border-hairline);">
+          <td style="padding: 6px 0; font-family: var(--font-mono); color: var(--text-pure);">${escapeHtml(ep.path)}</td>
+          <td style="padding: 6px 0; color: var(--text-dim); text-align: right;">Last seen: ${formatDate(ep.last_seen_in_archive)}</td>
+          <td style="padding: 6px 0; text-align: right;"><span class="badge badge-method-delete" style="font-size: 10px;">${ep.current_status}</span></td>
+        </tr>`;
+      });
+      html += `</tbody></table></div>`;
+    }
+
+    if (topology.active_historical_endpoints && topology.active_historical_endpoints.length > 0) {
+      html += `<div>
+        <div style="font-size: 12px; font-weight: bold; color: var(--emerald-primary); margin-bottom: 8px;">✅ Active Historical Endpoints</div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+          <tbody>`;
+      topology.active_historical_endpoints.forEach(ep => {
+        html += `<tr style="border-bottom: 1px solid var(--border-hairline);">
+          <td style="padding: 6px 0; font-family: var(--font-mono); color: var(--text-pure);">${escapeHtml(ep.path)}</td>
+          <td style="padding: 6px 0; color: var(--text-dim); text-align: right;">Last seen: ${formatDate(ep.last_seen_in_archive)}</td>
+          <td style="padding: 6px 0; text-align: right;"><span class="badge badge-method-get" style="font-size: 10px;">${ep.current_status}</span></td>
+        </tr>`;
+      });
+      html += `</tbody></table></div>`;
+    }
+
+    if (topology.ghost_endpoints.length === 0 && topology.active_historical_endpoints.length === 0) {
+      html += `<div style="color: var(--text-muted); font-size: 12px;">No specific JSON endpoints found in the archive for this domain.</div>`;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+    
+    if (btn) btn.style.display = "none";
+    
+  } catch (err) {
+    if (btn) {
+      btn.innerHTML = `<span class="btn-icon">❌</span> ${escapeHtml(err.message)}`;
+      btn.classList.replace("btn-secondary", "btn-danger");
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.innerHTML = `<span class="btn-icon">👻</span> Retry Archeology`;
+        btn.classList.replace("btn-danger", "btn-secondary");
       }, 3000);
     }
   }

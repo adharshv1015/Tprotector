@@ -12,6 +12,10 @@ class DiffSeverity(str, enum.Enum):
     BREAKING = "breaking"
     NON_BREAKING = "non_breaking"
     INFORMATIONAL = "informational"
+    CRITICAL = "critical"
+    HIGH = "high"
+    LOW = "low"
+    MEDIUM = "medium"
 
 
 class SchemaDiff(Base):

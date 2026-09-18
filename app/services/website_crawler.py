@@ -39,9 +39,18 @@ async def crawl_website_assets(target_url: str) -> Tuple[str, List[str], Optiona
             resp = await client.get(safe_url)
             server_header = resp.headers.get("server")
             root_html = resp.text
+        except httpx.ConnectError as exc:
+            err_str = str(exc)
+            if any(e in err_str for e in ["getaddrinfo failed", "Name or service not known", "nodename nor servname provided", "No address associated with hostname"]):
+                from fastapi import HTTPException
+                raise HTTPException(status_code=400, detail="Link is not identified")
+            logger.warning(f"Connection failed for {safe_url}: {exc}")
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail=f"Connection failed: {exc}")
         except Exception as exc:
             logger.warning(f"Failed to fetch HTML for {safe_url}: {exc}")
-            return "", [], None
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail=f"Failed to fetch website: {exc}")
 
         # Extract same-origin <script src="...">
         script_srcs: List[str] = []

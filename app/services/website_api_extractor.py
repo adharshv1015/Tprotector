@@ -79,6 +79,21 @@ async def extract_and_analyze_website_apis(target_input: str) -> WebsiteApiRepor
     # 1. Crawl website HTML and same-origin JS
     root_html, js_scripts, server_header = await crawl_website_assets(safe_url)
 
+    # 1.5. Wildcard / Parked Domain Detection
+    # If a completely random non-existent path returns a 200 OK (especially HTML), 
+    # the domain is likely parked, for sale, or a wildcard catch-all, meaning it's not a real API.
+    random_path_url = urljoin(base_url, "/_tprotector_nonexistent_probe_84719283")
+    try:
+        async with httpx.AsyncClient(timeout=5.0, verify=False) as client:
+            test_resp = await client.get(random_path_url)
+            if test_resp.status_code == 200 and "text/html" in test_resp.headers.get("content-type", "").lower():
+                from fastapi import HTTPException
+                raise HTTPException(status_code=400, detail="Link is not identified")
+    except httpx.ConnectError:
+        pass
+    except Exception:
+        pass
+
     # 2. Extract from HTML <link> tags
     wp_link_match = re.search(r'<link[^>]+rel=["\']https://api\.w\.org/["\'][^>]+href=["\']([^"\']+)["\']', root_html, re.IGNORECASE)
     if not wp_link_match:

@@ -1,10 +1,12 @@
 import asyncio
-from httpx import AsyncClient
+import httpx
 
-async def run():
-    async with AsyncClient() as client:
-        res = await client.get("http://localhost:8000/events?limit=50")
-        print(res.status_code)
-        print(res.text)
+async def main():
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.get("https://evi.https.com")
+    except Exception as e:
+        print(f"Exception Type: {type(e).__name__}")
+        print(f"Exception String: {str(e)}")
 
-asyncio.run(run())
+asyncio.run(main())

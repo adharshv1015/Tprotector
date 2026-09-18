@@ -353,12 +353,17 @@
 
         <!-- Panel 2: Diff History -->
         <div class="modal-tab-panel hidden" id="mpanel-diff-history">
-          <div style="display: flex; justify-content: flex-end; margin-bottom: 15px;">
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 15px;">
             <button class="btn btn-primary btn-sm" id="btn-deep-history" onclick="fetchDeepHistory()"
               style="background-color: var(--amethyst-primary); border-color: var(--amethyst-primary); color: #fff;">
               <span class="btn-icon">🔍</span> Deep Scan Web Archives
             </button>
+            <button class="btn btn-secondary btn-sm" id="btn-ghost-endpoints" onclick="fetchTopologyArcheology()"
+              style="border-color: var(--amber-primary); color: var(--amber-primary);">
+              <span class="btn-icon">👻</span> Discover Ghost Endpoints
+            </button>
           </div>
+          <div id="topology-archeology-container" style="margin-bottom: 20px;"></div>
           <div id="deep-history-container" style="margin-bottom: 20px;"></div>
           <div class="diff-records-container" id="diff-records-container">
             <!-- Chronological Diffs -->

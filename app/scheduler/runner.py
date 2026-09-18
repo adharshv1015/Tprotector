@@ -111,12 +111,17 @@ async def _execute_check(api_id: int, db: AsyncSession, force: bool = False) -> 
 
     # 3. Handle network / connection failures
     if error:
+        if "ConnectError" in error and any(e in error for e in ["getaddrinfo failed", "Name or service not known", "nodename nor servname provided", "No address associated with hostname"]):
+            message = f"Link is not identified for {tracked_api.name}"
+        else:
+            message = f"Check failed for {tracked_api.name}: {error}"
+            
         await record_event(
             db=db,
             tracked_api_id=api_id,
             event_type="connection_error",
             severity=EventSeverity.HIGH,
-            message=f"Check failed for {tracked_api.name}: {error}"
+            message=message
         )
         return snapshot
         
